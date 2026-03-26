@@ -4,6 +4,7 @@ import type {
   Campaign,
   CampaignRecipient,
   CreateCampaignPayload,
+  DirectMessage,
   YCloudTemplate,
 } from '@/types/marketing.types';
 
@@ -12,10 +13,12 @@ interface MarketingState {
   currentCampaign: Campaign | null;
   recipients: CampaignRecipient[];
   templates: YCloudTemplate[];
+  directMessages: DirectMessage[];
   loadingCampaigns: boolean;
   loadingCurrent: boolean;
   loadingRecipients: boolean;
   loadingTemplates: boolean;
+  loadingDirectMessages: boolean;
   submitting: boolean;
   error: string | null;
 }
@@ -25,10 +28,12 @@ const initialState: MarketingState = {
   currentCampaign: null,
   recipients: [],
   templates: [],
+  directMessages: [],
   loadingCampaigns: false,
   loadingCurrent: false,
   loadingRecipients: false,
   loadingTemplates: false,
+  loadingDirectMessages: false,
   submitting: false,
   error: null,
 };
@@ -60,6 +65,10 @@ export const executeCampaign = createAsyncThunk('marketing/executeCampaign', (id
 
 export const deleteCampaign = createAsyncThunk('marketing/deleteCampaign', (id: string) =>
   marketingApi.deleteCampaign(id).then(() => id),
+);
+
+export const fetchDirectMessages = createAsyncThunk('marketing/fetchDirectMessages', () =>
+  marketingApi.getDirectMessages(),
 );
 
 const campaignsSlice = createSlice({
@@ -141,7 +150,15 @@ const campaignsSlice = createSlice({
         state.submitting = false;
         state.campaigns = state.campaigns.filter((c) => c.id !== action.payload);
       })
-      .addCase(deleteCampaign.rejected, (state) => { state.submitting = false; });
+      .addCase(deleteCampaign.rejected, (state) => { state.submitting = false; })
+
+      // direct messages
+      .addCase(fetchDirectMessages.pending, (state) => { state.loadingDirectMessages = true; })
+      .addCase(fetchDirectMessages.fulfilled, (state, action) => {
+        state.loadingDirectMessages = false;
+        state.directMessages = action.payload;
+      })
+      .addCase(fetchDirectMessages.rejected, (state) => { state.loadingDirectMessages = false; });
   },
 });
 

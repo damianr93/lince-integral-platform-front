@@ -3,6 +3,7 @@ import type {
   Campaign,
   CampaignRecipient,
   CreateCampaignPayload,
+  DirectMessage,
   YCloudTemplate,
 } from '@/types/marketing.types';
 
@@ -36,3 +37,6 @@ export interface SendSinglePayload {
 
 export const sendSingle = (payload: SendSinglePayload) =>
   api.post<{ messageId: string; to: string }>('/marketing/send-single', payload);
+
+export const getDirectMessages = () =>
+  api.get<DirectMessage[]>('/marketing/direct-messages');

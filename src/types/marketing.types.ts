@@ -54,6 +54,17 @@ export interface YCloudTemplate {
   buttons?: { type: string; text: string }[];
 }
 
+export interface DirectMessage {
+  id: string;
+  phone: string;
+  advisor: string;
+  templateName: string;
+  templateLanguage: string;
+  yCloudMessageId: string;
+  sentBy: string;
+  createdAt: string;
+}
+
 export interface CreateCampaignPayload {
   name: string;
   templateName: string;

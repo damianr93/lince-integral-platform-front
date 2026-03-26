@@ -66,6 +66,9 @@ const CampaignDetailPage = lazy(() =>
 const MarketingSeguimientoPage = lazy(() =>
   import('@/pages/marketing/SeguimientoPage').then((m) => ({ default: m.SeguimientoPage })),
 );
+const DirectMessagesPage = lazy(() =>
+  import('@/pages/marketing/DirectMessagesPage').then((m) => ({ default: m.DirectMessagesPage })),
+);
 const OcrDashboardPage = lazy(() =>
   import('@/pages/ocr/OcrDashboardPage').then((m) => ({ default: m.OcrDashboardPage })),
 );
@@ -240,6 +243,14 @@ const router = createBrowserRouter([
                     element: (
                       <Suspense fallback={<PageLoader />}>
                         <CampaignDetailPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'direct-messages',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <DirectMessagesPage />
                       </Suspense>
                     ),
                   },
