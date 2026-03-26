@@ -1,0 +1,305 @@
+import { lazy, Suspense } from 'react';
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
+import { GlobalRole, ModuleKey } from '@/types';
+import { PrivateRoute } from './PrivateRoute';
+import { RequireModule } from './RequireModule';
+import { RequireRole } from './RequireRole';
+import { AppLayout } from '@/components/AppLayout';
+import { LoginPage } from '@/pages/LoginPage';
+
+const DashboardPage = lazy(() =>
+  import('@/pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+);
+const ModulePlaceholder = lazy(() =>
+  import('@/pages/ModulePlaceholder').then((m) => ({ default: m.ModulePlaceholder })),
+);
+
+const CrmLayout = lazy(() =>
+  import('@/pages/crm/CrmLayout').then((m) => ({ default: m.CrmLayout })),
+);
+const CrmAnalyticsPage = lazy(() =>
+  import('@/pages/crm/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })),
+);
+const CrmClientsPage = lazy(() =>
+  import('@/pages/crm/ClientsPage').then((m) => ({ default: m.ClientsPage })),
+);
+const CrmSatisfactionPage = lazy(() =>
+  import('@/pages/crm/SatisfactionPage').then((m) => ({ default: m.SatisfactionPage })),
+);
+
+const ConciliacionesLayout = lazy(() =>
+  import('@/pages/conciliaciones/ConciliacionesLayout').then((m) => ({ default: m.ConciliacionesLayout })),
+);
+const ConciliacionesDashboardPage = lazy(() =>
+  import('@/pages/conciliaciones/DashboardPage').then((m) => ({ default: m.ConciliacionesDashboardPage })),
+);
+const NewReconciliationPage = lazy(() =>
+  import('@/pages/conciliaciones/NewReconciliationPage').then((m) => ({ default: m.NewReconciliationPage })),
+);
+const RunDetailPage = lazy(() =>
+  import('@/pages/conciliaciones/RunDetailPage').then((m) => ({ default: m.RunDetailPage })),
+);
+const CategoriesPage = lazy(() =>
+  import('@/pages/conciliaciones/CategoriesPage').then((m) => ({ default: m.CategoriesPage })),
+);
+
+const SuperAdminPage = lazy(() =>
+  import('@/pages/admin/SuperAdminPage').then((m) => ({ default: m.SuperAdminPage })),
+);
+const ChangePasswordPage = lazy(() =>
+  import('@/pages/ChangePasswordPage').then((m) => ({ default: m.ChangePasswordPage })),
+);
+
+const OcrLayout = lazy(() =>
+  import('@/pages/ocr/OcrLayout').then((m) => ({ default: m.OcrLayout })),
+);
+
+const MarketingLayout = lazy(() =>
+  import('@/pages/marketing/MarketingLayout').then((m) => ({ default: m.MarketingLayout })),
+);
+const CampaignsPage = lazy(() =>
+  import('@/pages/marketing/CampaignsPage').then((m) => ({ default: m.CampaignsPage })),
+);
+const CampaignDetailPage = lazy(() =>
+  import('@/pages/marketing/CampaignDetailPage').then((m) => ({ default: m.CampaignDetailPage })),
+);
+const MarketingSeguimientoPage = lazy(() =>
+  import('@/pages/marketing/SeguimientoPage').then((m) => ({ default: m.SeguimientoPage })),
+);
+const OcrDashboardPage = lazy(() =>
+  import('@/pages/ocr/OcrDashboardPage').then((m) => ({ default: m.OcrDashboardPage })),
+);
+const OcrRemitosPage = lazy(() =>
+  import('@/pages/ocr/OcrRemitosPage').then((m) => ({ default: m.OcrRemitosPage })),
+);
+const OcrFacturasPage = lazy(() =>
+  import('@/pages/ocr/OcrFacturasPage').then((m) => ({ default: m.OcrFacturasPage })),
+);
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-full min-h-[400px]">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+    </div>
+  );
+}
+
+const router = createBrowserRouter([
+  { path: '/login', element: <LoginPage /> },
+  {
+    // Change password is inside PrivateRoute so the user must be authenticated
+    element: <PrivateRoute />,
+    children: [
+      {
+        path: 'change-password',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <ChangePasswordPage />
+          </Suspense>
+        ),
+      },
+    ],
+  },
+  {
+    element: <PrivateRoute />,
+    children: [
+      {
+        element: <AppLayout />,
+        children: [
+          {
+            index: true,
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <DashboardPage />
+              </Suspense>
+            ),
+          },
+          {
+            path: 'crm',
+            element: <RequireModule moduleKey={ModuleKey.CRM} />,
+            children: [
+              {
+                element: (
+                  <Suspense fallback={<PageLoader />}>
+                    <CrmLayout />
+                  </Suspense>
+                ),
+                children: [
+                  { index: true, element: <Navigate to="analytics" replace /> },
+                  {
+                    path: 'analytics',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <CrmAnalyticsPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'clients',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <CrmClientsPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'satisfaction',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <CrmSatisfactionPage />
+                      </Suspense>
+                    ),
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            path: 'conciliaciones',
+            element: <RequireModule moduleKey={ModuleKey.CONCILIACIONES} />,
+            children: [
+              {
+                element: (
+                  <Suspense fallback={<PageLoader />}>
+                    <ConciliacionesLayout />
+                  </Suspense>
+                ),
+                children: [
+                  {
+                    index: true,
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <ConciliacionesDashboardPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'nueva',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <NewReconciliationPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'run/:id',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <RunDetailPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'categorias',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <CategoriesPage />
+                      </Suspense>
+                    ),
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            path: 'admin',
+            element: <RequireRole role={GlobalRole.SUPERADMIN} />,
+            children: [
+              {
+                index: true,
+                element: (
+                  <Suspense fallback={<PageLoader />}>
+                    <SuperAdminPage />
+                  </Suspense>
+                ),
+              },
+            ],
+          },
+          {
+            path: 'marketing',
+            element: <RequireModule moduleKey={ModuleKey.MARKETING} />,
+            children: [
+              {
+                element: (
+                  <Suspense fallback={<PageLoader />}>
+                    <MarketingLayout />
+                  </Suspense>
+                ),
+                children: [
+                  { index: true, element: <Navigate to="campaigns" replace /> },
+                  {
+                    path: 'campaigns',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <CampaignsPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'campaigns/:id',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <CampaignDetailPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'seguimiento',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <MarketingSeguimientoPage />
+                      </Suspense>
+                    ),
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            path: 'ocr',
+            element: <RequireModule moduleKey={ModuleKey.OCR} />,
+            children: [
+              {
+                element: (
+                  <Suspense fallback={<PageLoader />}>
+                    <OcrLayout />
+                  </Suspense>
+                ),
+                children: [
+                  {
+                    index: true,
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <OcrDashboardPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'remitos',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <OcrRemitosPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'facturas',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <OcrFacturasPage />
+                      </Suspense>
+                    ),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+]);
+
+export function AppRouter() {
+  return <RouterProvider router={router} />;
+}
