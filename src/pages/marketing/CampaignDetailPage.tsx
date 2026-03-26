@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -10,6 +10,7 @@ import {
   clearCurrentCampaign,
 } from '@/store/marketing/campaignsSlice';
 import { Button } from '@/components/ui/Button';
+import { ExecuteConfirmModal } from './ExecuteConfirmModal';
 import type { CampaignRecipient } from '@/types/marketing.types';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -71,6 +72,7 @@ export function CampaignDetailPage() {
   const navigate = useNavigate();
   const { currentCampaign, recipients, loadingCurrent, loadingRecipients, submitting } =
     useAppSelector((s) => s.marketing);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -84,6 +86,7 @@ export function CampaignDetailPage() {
     try {
       await dispatch(executeCampaign(id)).unwrap();
       toast.success('Campaña iniciada');
+      setShowConfirm(false);
       void dispatch(fetchRecipients(id));
     } catch {
       toast.error('Error al ejecutar la campaña');
@@ -152,7 +155,7 @@ export function CampaignDetailPage() {
           )}
 
           {c.status === 'DRAFT' && (
-            <Button size="sm" loading={submitting} onClick={() => void handleExecute()}>
+            <Button size="sm" onClick={() => setShowConfirm(true)}>
               <Play className="h-3.5 w-3.5 mr-1.5" />
               Ejecutar
             </Button>
@@ -200,6 +203,15 @@ export function CampaignDetailPage() {
             )}
           </div>
         </div>
+      )}
+
+      {showConfirm && (
+        <ExecuteConfirmModal
+          campaign={c}
+          submitting={submitting}
+          onConfirm={() => void handleExecute()}
+          onClose={() => setShowConfirm(false)}
+        />
       )}
 
       {/* Informe de destinatarios */}

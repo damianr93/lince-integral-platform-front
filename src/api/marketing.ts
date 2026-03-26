@@ -23,3 +23,6 @@ export const executeCampaign = (id: string) =>
 
 export const getCampaignRecipients = (id: string) =>
   api.get<CampaignRecipient[]>(`/marketing/campaigns/${id}/recipients`);
+
+export const deleteCampaign = (id: string) =>
+  api.delete<void>(`/marketing/campaigns/${id}`);

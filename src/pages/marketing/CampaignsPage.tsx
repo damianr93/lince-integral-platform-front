@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Play, ChevronRight } from 'lucide-react';
+import { Plus, Play, ChevronRight, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
@@ -8,9 +8,11 @@ import {
   fetchTemplates,
   createCampaign,
   executeCampaign,
+  deleteCampaign,
 } from '@/store/marketing/campaignsSlice';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
+import { ExecuteConfirmModal } from './ExecuteConfirmModal';
 import type { Campaign, YCloudTemplate, CreateCampaignPayload } from '@/types/marketing.types';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -310,7 +312,9 @@ export function CampaignsPage() {
     useAppSelector((s) => s.marketing);
 
   const [showWizard, setShowWizard] = useState(false);
+  const [confirmCampaign, setConfirmCampaign] = useState<Campaign | null>(null);
   const [executingId, setExecutingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     void dispatch(fetchCampaigns());
@@ -333,16 +337,32 @@ export function CampaignsPage() {
     }
   }
 
-  async function handleExecute(campaign: Campaign) {
-    setExecutingId(campaign.id);
+  async function handleExecute() {
+    if (!confirmCampaign) return;
+    const id = confirmCampaign.id;
+    setExecutingId(id);
     try {
-      await dispatch(executeCampaign(campaign.id)).unwrap();
+      await dispatch(executeCampaign(id)).unwrap();
       toast.success('Campaña iniciada');
-      navigate(`/marketing/campaigns/${campaign.id}`);
+      setConfirmCampaign(null);
+      navigate(`/marketing/campaigns/${id}`);
     } catch {
       toast.error('Error al ejecutar la campaña');
     } finally {
       setExecutingId(null);
+    }
+  }
+
+  async function handleDelete(campaign: Campaign) {
+    if (!window.confirm(`¿Eliminar la campaña "${campaign.name}"? Esta acción no se puede deshacer.`)) return;
+    setDeletingId(campaign.id);
+    try {
+      await dispatch(deleteCampaign(campaign.id)).unwrap();
+      toast.success('Campaña eliminada');
+    } catch {
+      toast.error('Error al eliminar la campaña');
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -429,14 +449,24 @@ export function CampaignsPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                         {c.status === 'DRAFT' && (
-                          <button
-                            disabled={executingId === c.id}
-                            onClick={() => void handleExecute(c)}
-                            className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
-                          >
-                            <Play className="h-3 w-3" />
-                            <span className="hidden sm:inline">Ejecutar</span>
-                          </button>
+                          <>
+                            <button
+                              disabled={executingId === c.id}
+                              onClick={() => setConfirmCampaign(c)}
+                              className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+                            >
+                              <Play className="h-3 w-3" />
+                              <span className="hidden sm:inline">Ejecutar</span>
+                            </button>
+                            <button
+                              disabled={deletingId === c.id}
+                              onClick={() => void handleDelete(c)}
+                              className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                              title="Eliminar borrador"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
                         )}
                         <button
                           onClick={() => navigate(`/marketing/campaigns/${c.id}`)}
@@ -461,6 +491,15 @@ export function CampaignsPage() {
           submitting={submitting}
           onSubmit={(p) => void handleCreate(p)}
           onClose={() => setShowWizard(false)}
+        />
+      )}
+
+      {confirmCampaign && (
+        <ExecuteConfirmModal
+          campaign={confirmCampaign}
+          submitting={submitting}
+          onConfirm={() => void handleExecute()}
+          onClose={() => setConfirmCampaign(null)}
         />
       )}
     </div>

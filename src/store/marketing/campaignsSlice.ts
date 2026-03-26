@@ -58,6 +58,10 @@ export const executeCampaign = createAsyncThunk('marketing/executeCampaign', (id
   marketingApi.executeCampaign(id),
 );
 
+export const deleteCampaign = createAsyncThunk('marketing/deleteCampaign', (id: string) =>
+  marketingApi.deleteCampaign(id).then(() => id),
+);
+
 const campaignsSlice = createSlice({
   name: 'marketing',
   initialState,
@@ -129,7 +133,15 @@ const campaignsSlice = createSlice({
         const idx = state.campaigns.findIndex((c) => c.id === action.payload.id);
         if (idx !== -1) state.campaigns[idx] = action.payload;
       })
-      .addCase(executeCampaign.rejected, (state) => { state.submitting = false; });
+      .addCase(executeCampaign.rejected, (state) => { state.submitting = false; })
+
+      // delete
+      .addCase(deleteCampaign.pending, (state) => { state.submitting = true; })
+      .addCase(deleteCampaign.fulfilled, (state, action) => {
+        state.submitting = false;
+        state.campaigns = state.campaigns.filter((c) => c.id !== action.payload);
+      })
+      .addCase(deleteCampaign.rejected, (state) => { state.submitting = false; });
   },
 });
 
