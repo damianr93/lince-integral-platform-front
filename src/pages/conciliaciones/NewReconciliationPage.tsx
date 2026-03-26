@@ -166,7 +166,7 @@ export function NewReconciliationPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Nueva Conciliación</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">Nueva Conciliación</h1>
         <p className="text-muted-foreground">Cargá los archivos y configurá el proceso de conciliación</p>
       </div>
 

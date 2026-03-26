@@ -10,7 +10,7 @@ const navItems = [
 export function ConciliacionesLayout() {
   return (
     <div className="flex flex-col h-full gap-0">
-      <nav className="flex items-center gap-1 border-b px-4 py-2 bg-card">
+      <nav className="flex items-center gap-1 border-b px-4 py-2 bg-card overflow-x-auto">
         {navItems.map(({ to, end, icon: Icon, label }) => (
           <NavLink
             key={to}
@@ -28,7 +28,7 @@ export function ConciliacionesLayout() {
           </NavLink>
         ))}
       </nav>
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-4 sm:p-6">
         <Outlet />
       </div>
     </div>

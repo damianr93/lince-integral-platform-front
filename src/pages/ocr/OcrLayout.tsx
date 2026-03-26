@@ -18,7 +18,7 @@ export function OcrLayout() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="border-b border-border px-6 py-2 flex items-center gap-1">
+      <div className="border-b border-border px-3 sm:px-6 py-2 flex items-center gap-1 overflow-x-auto">
         {isAdmin && (
           <NavLink to="/ocr" end className={navClass}>
             <LayoutDashboard className="h-4 w-4" />

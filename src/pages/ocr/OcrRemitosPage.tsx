@@ -24,9 +24,9 @@ export function OcrRemitosPage() {
   const [showCapture, setShowCapture] = useState(false);
 
   return (
-    <div className="p-6 space-y-6 max-w-2xl mx-auto">
+    <div className="p-4 sm:p-6 space-y-6 max-w-2xl mx-auto">
       {/* Header + connectivity */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-foreground">Terminal de Remitos</h1>
           <p className="text-sm text-muted-foreground">Captura y sincronización de remitos</p>
@@ -120,7 +120,8 @@ export function OcrRemitosPage() {
       <div>
         <h2 className="text-sm font-semibold text-foreground mb-3">Mis remitos recientes</h2>
         <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[320px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Descripción</th>
@@ -146,6 +147,7 @@ export function OcrRemitosPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     </div>

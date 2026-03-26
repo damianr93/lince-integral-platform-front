@@ -42,7 +42,7 @@ export function ReportFiltersModal({ onClose }: ReportFiltersModalProps) {
         </div>
 
         <div className="px-6 py-4 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-1">Fecha inicio</label>
               <input

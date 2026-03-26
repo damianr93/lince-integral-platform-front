@@ -170,7 +170,7 @@ export function ClientFormModal({ customer, onClose }: ClientFormModalProps) {
 
         <form onSubmit={(e) => void handleSubmit(e)}>
           <div className="px-6 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Nombre</label>
                 <input type="text" value={form.nombre} onChange={(e) => set('nombre', e.target.value)} placeholder="Nombre" className={inputClass} />
@@ -181,7 +181,7 @@ export function ClientFormModal({ customer, onClose }: ClientFormModalProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Teléfono <span className="text-destructive">*</span></label>
                 <input type="text" value={form.telefono} onChange={(e) => set('telefono', e.target.value)} placeholder="+54 9 ..." className={inputClass} />
@@ -197,7 +197,7 @@ export function ClientFormModal({ customer, onClose }: ClientFormModalProps) {
               <ProductSelect value={form.producto} onChange={(v) => set('producto', v)} />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Actividad</label>
                 <select value={form.actividad} onChange={(e) => set('actividad', e.target.value)} className={selectClass}>
@@ -221,7 +221,7 @@ export function ClientFormModal({ customer, onClose }: ClientFormModalProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Estado</label>
                 <select value={form.estado} onChange={(e) => set('estado', e.target.value)} className={selectClass}>
@@ -251,7 +251,7 @@ export function ClientFormModal({ customer, onClose }: ClientFormModalProps) {
               <LocationSearch value={geoResult} onSelect={setGeoResult} placeholder="Buscar localidad o provincia..." />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Cabezas</label>
                 <input type="number" value={form.cabezas} onChange={(e) => set('cabezas', e.target.value)} placeholder="0" min="0" className={inputClass} />

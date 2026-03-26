@@ -1,31 +1,36 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { AuthUser } from '@/types';
 import { APP_MODULE_NAV, isNavItemVisible } from '@/modules/registry';
 
 interface SidebarProps {
   user: AuthUser;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({ user, mobileOpen = false, onMobileClose }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   const visible = APP_MODULE_NAV.filter((entry) => isNavItemVisible(entry, user));
 
-  return (
-    <aside
-      className={[
-        'flex flex-col h-full bg-card border-r border-border transition-all duration-200',
-        collapsed ? 'w-14' : 'w-56',
-      ].join(' ')}
-    >
-      <div className="flex justify-end p-2">
+  const navContent = (
+    <>
+      <div className="flex items-center justify-between p-2">
+        <button
+          type="button"
+          onClick={onMobileClose}
+          aria-label="Cerrar menú"
+          className="md:hidden rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? 'Expandir' : 'Colapsar'}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          className="hidden md:flex ml-auto rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
         >
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </button>
@@ -37,21 +42,46 @@ export function Sidebar({ user }: SidebarProps) {
             key={key}
             to={path}
             end={path === '/'}
+            onClick={onMobileClose}
             className={({ isActive }) =>
               [
                 'flex items-center gap-3 rounded-md px-2 py-2 text-sm font-medium transition-colors',
                 isActive
                   ? 'bg-primary text-primary-foreground'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                collapsed ? 'justify-center' : '',
+                collapsed ? 'md:justify-center' : '',
               ].join(' ')
             }
           >
             <Icon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>{label}</span>}
+            <span className={collapsed ? 'md:hidden' : ''}>{label}</span>
           </NavLink>
         ))}
       </nav>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile drawer */}
+      <aside
+        className={[
+          'fixed inset-y-0 left-0 z-50 flex flex-col w-64 bg-card border-r border-border transition-transform duration-200 md:hidden',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        ].join(' ')}
+      >
+        {navContent}
+      </aside>
+
+      {/* Desktop sidebar */}
+      <aside
+        className={[
+          'hidden md:flex flex-col h-full bg-card border-r border-border transition-all duration-200',
+          collapsed ? 'w-14' : 'w-56',
+        ].join(' ')}
+      >
+        {navContent}
+      </aside>
+    </>
   );
 }

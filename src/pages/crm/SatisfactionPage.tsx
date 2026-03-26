@@ -113,10 +113,10 @@ export function SatisfactionPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       <h1 className="text-lg font-semibold text-foreground">Satisfacción</h1>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {loading ? (
           Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="bg-card border border-border rounded-lg p-4 h-20 animate-pulse bg-muted" />
@@ -131,7 +131,7 @@ export function SatisfactionPage() {
       </div>
 
       {!loading && !error && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded-lg p-4">
             <h3 className="text-sm font-medium text-foreground mb-4">Calidad promedio por recomendación</h3>
             <ResponsiveContainer width="100%" height={200}>

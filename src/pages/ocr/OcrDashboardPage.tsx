@@ -30,7 +30,7 @@ export function OcrDashboardPage() {
   const approved = MOCK_DOCS.filter((d) => d.status === 'APROBADO').length;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-lg font-semibold text-foreground">Gestión de Documentos — OCR</h1>
@@ -42,7 +42,7 @@ export function OcrDashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-card border border-border rounded-lg p-4">
           <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Total documentos</p>
           <p className="mt-1 text-2xl font-bold text-foreground">{totalDocs}</p>
@@ -58,7 +58,7 @@ export function OcrDashboardPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <select className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring">
           <option value="">Todos los tipos</option>
           <option value="REMITO">Remitos</option>
@@ -79,7 +79,8 @@ export function OcrDashboardPage() {
 
       {/* Documents table */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[600px]">
           <thead>
             <tr className="border-b border-border bg-muted/30">
               <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Tipo</th>
@@ -128,6 +129,7 @@ export function OcrDashboardPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

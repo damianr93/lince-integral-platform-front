@@ -11,7 +11,7 @@ export function CrmLayout() {
     <div className="flex flex-col h-full">
       {/* Tab bar */}
       <div className="border-b border-border bg-card">
-        <nav className="flex gap-0 px-4">
+        <nav className="flex gap-0 px-4 overflow-x-auto">
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}

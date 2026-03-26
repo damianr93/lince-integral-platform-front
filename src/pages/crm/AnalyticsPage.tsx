@@ -185,7 +185,7 @@ export function AnalyticsPage() {
   const isComparisonChart = comparisonEnabled && comparisonSnapshot !== null;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-lg font-semibold text-foreground">Dashboard CRM</h1>
@@ -239,7 +239,7 @@ export function AnalyticsPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {loading ? (
           Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="bg-card border border-border rounded-lg p-4 h-20 animate-pulse bg-muted" />
@@ -282,7 +282,7 @@ export function AnalyticsPage() {
       </div>
 
       {/* Channels + Status */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-card border border-border rounded-lg p-4">
           <h3 className="text-sm font-medium text-foreground mb-4">Canales de adquisición</h3>
           {loading ? (

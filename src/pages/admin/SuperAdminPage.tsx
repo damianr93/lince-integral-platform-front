@@ -219,7 +219,7 @@ function CreateUserModal({ areas, onClose }: { areas: AreaDto[]; onClose: () => 
   return (
     <Dialog open onClose={onClose} title="Crear usuario">
       <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label htmlFor="new-name">Nombre</Label>
             <Input id="new-name" value={name} onChange={(e) => setName(e.target.value)} required />
@@ -233,7 +233,7 @@ function CreateUserModal({ areas, onClose }: { areas: AreaDto[]; onClose: () => 
           <Label htmlFor="new-password">Contraseña</Label>
           <Input id="new-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label htmlFor="new-area">Área</Label>
             <Select id="new-area" value={selectedArea} onChange={(e) => handleAreaChange(e.target.value)}>
@@ -408,7 +408,8 @@ function UsersTab({ areas }: { areas: AreaDto[] }) {
         </div>
       ) : (
         <div className="rounded-lg border bg-card overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead className="border-b bg-muted/40">
               <tr>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Usuario</th>
@@ -497,6 +498,7 @@ function UsersTab({ areas }: { areas: AreaDto[] }) {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -540,7 +542,8 @@ function AreasTab() {
         </div>
       ) : (
         <div className="rounded-lg border bg-card overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[400px]">
             <thead className="border-b bg-muted/40">
               <tr>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Área</th>
@@ -589,6 +592,7 @@ function AreasTab() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

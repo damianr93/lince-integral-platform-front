@@ -47,8 +47,8 @@ function DetailPanel({ factura, onClose }: { factura: Factura; onClose: () => vo
   const canEdit = factura.status === 'CON_ERRORES' || factura.status === 'VALIDO';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-card border border-border rounded-lg w-full max-w-xl mx-4 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
+      <div className="bg-card border border-border rounded-lg w-full max-w-xl shadow-xl my-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="text-base font-semibold text-foreground">{factura.preview}</h2>
           <button onClick={onClose} className="text-sm text-muted-foreground hover:text-foreground">✕</button>
@@ -118,7 +118,7 @@ export function OcrFacturasPage() {
   const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       <div>
         <h1 className="text-lg font-semibold text-foreground">Mis Facturas</h1>
         <p className="text-sm text-muted-foreground mt-1">Cargá facturas y corregí los campos extraídos por OCR</p>
@@ -144,7 +144,8 @@ export function OcrFacturasPage() {
           <h2 className="text-sm font-semibold text-foreground">Facturas cargadas</h2>
           <p className="text-xs text-muted-foreground">{MOCK_FACTURAS.length} facturas</p>
         </div>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[400px]">
           <thead>
             <tr className="border-b border-border bg-muted/30">
               <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Factura</th>
@@ -176,6 +177,7 @@ export function OcrFacturasPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-900/20 dark:border-blue-800">
