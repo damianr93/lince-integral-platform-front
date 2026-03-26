@@ -26,3 +26,13 @@ export const getCampaignRecipients = (id: string) =>
 
 export const deleteCampaign = (id: string) =>
   api.delete<void>(`/marketing/campaigns/${id}`);
+
+export interface SendSinglePayload {
+  phone: string;
+  templateName: string;
+  templateLanguage: string;
+  advisor: 'EZEQUIEL' | 'DENIS' | 'MARTIN';
+}
+
+export const sendSingle = (payload: SendSinglePayload) =>
+  api.post<{ messageId: string; to: string }>('/marketing/send-single', payload);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Play, ChevronRight, Trash2 } from 'lucide-react';
+import { Plus, Play, ChevronRight, Trash2, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { ExecuteConfirmModal } from './ExecuteConfirmModal';
+import { SendSingleModal } from './SendSingleModal';
 import type { Campaign, YCloudTemplate, CreateCampaignPayload } from '@/types/marketing.types';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -312,6 +313,7 @@ export function CampaignsPage() {
     useAppSelector((s) => s.marketing);
 
   const [showWizard, setShowWizard] = useState(false);
+  const [showSendSingle, setShowSendSingle] = useState(false);
   const [confirmCampaign, setConfirmCampaign] = useState<Campaign | null>(null);
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -321,10 +323,10 @@ export function CampaignsPage() {
   }, [dispatch]);
 
   useEffect(() => {
-    if (showWizard && templates.length === 0) {
+    if ((showWizard || showSendSingle) && templates.length === 0) {
       void dispatch(fetchTemplates());
     }
-  }, [dispatch, showWizard, templates.length]);
+  }, [dispatch, showWizard, showSendSingle, templates.length]);
 
   async function handleCreate(payload: CreateCampaignPayload) {
     try {
@@ -371,10 +373,16 @@ export function CampaignsPage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-foreground">Campañas</h1>
-        <Button size="sm" onClick={() => setShowWizard(true)}>
-          <Plus className="h-4 w-4 mr-1.5" />
-          Nueva campaña
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowSendSingle(true)}>
+            <Send className="h-4 w-4 mr-1.5" />
+            Envío rápido
+          </Button>
+          <Button size="sm" onClick={() => setShowWizard(true)}>
+            <Plus className="h-4 w-4 mr-1.5" />
+            Nueva campaña
+          </Button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -500,6 +508,14 @@ export function CampaignsPage() {
           submitting={submitting}
           onConfirm={() => void handleExecute()}
           onClose={() => setConfirmCampaign(null)}
+        />
+      )}
+
+      {showSendSingle && (
+        <SendSingleModal
+          templates={templates}
+          loadingTemplates={loadingTemplates}
+          onClose={() => setShowSendSingle(false)}
         />
       )}
     </div>
