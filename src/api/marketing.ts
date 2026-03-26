@@ -40,3 +40,6 @@ export const sendSingle = (payload: SendSinglePayload) =>
 
 export const getDirectMessages = () =>
   api.get<DirectMessage[]>('/marketing/direct-messages');
+
+export const getFilterOptions = () =>
+  api.get<{ productos: string[] }>('/marketing/filter-options');

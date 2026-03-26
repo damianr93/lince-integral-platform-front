@@ -4,6 +4,7 @@ export type RecipientStatus = 'PENDING' | 'SENT' | 'FAILED' | 'SKIPPED';
 export interface RecipientFilter {
   siguiendo?: string[];
   estado?: string[];
+  producto?: string[];
 }
 
 export interface Campaign {

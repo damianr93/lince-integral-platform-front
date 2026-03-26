@@ -14,11 +14,13 @@ interface MarketingState {
   recipients: CampaignRecipient[];
   templates: YCloudTemplate[];
   directMessages: DirectMessage[];
+  filterOptions: { productos: string[] };
   loadingCampaigns: boolean;
   loadingCurrent: boolean;
   loadingRecipients: boolean;
   loadingTemplates: boolean;
   loadingDirectMessages: boolean;
+  loadingFilterOptions: boolean;
   submitting: boolean;
   error: string | null;
 }
@@ -29,11 +31,13 @@ const initialState: MarketingState = {
   recipients: [],
   templates: [],
   directMessages: [],
+  filterOptions: { productos: [] },
   loadingCampaigns: false,
   loadingCurrent: false,
   loadingRecipients: false,
   loadingTemplates: false,
   loadingDirectMessages: false,
+  loadingFilterOptions: false,
   submitting: false,
   error: null,
 };
@@ -69,6 +73,10 @@ export const deleteCampaign = createAsyncThunk('marketing/deleteCampaign', (id: 
 
 export const fetchDirectMessages = createAsyncThunk('marketing/fetchDirectMessages', () =>
   marketingApi.getDirectMessages(),
+);
+
+export const fetchFilterOptions = createAsyncThunk('marketing/fetchFilterOptions', () =>
+  marketingApi.getFilterOptions(),
 );
 
 const campaignsSlice = createSlice({
@@ -158,7 +166,15 @@ const campaignsSlice = createSlice({
         state.loadingDirectMessages = false;
         state.directMessages = action.payload;
       })
-      .addCase(fetchDirectMessages.rejected, (state) => { state.loadingDirectMessages = false; });
+      .addCase(fetchDirectMessages.rejected, (state) => { state.loadingDirectMessages = false; })
+
+      // filter options
+      .addCase(fetchFilterOptions.pending, (state) => { state.loadingFilterOptions = true; })
+      .addCase(fetchFilterOptions.fulfilled, (state, action) => {
+        state.loadingFilterOptions = false;
+        state.filterOptions = action.payload;
+      })
+      .addCase(fetchFilterOptions.rejected, (state) => { state.loadingFilterOptions = false; });
   },
 });
 

@@ -6,6 +6,7 @@ import { useAppDispatch, useAppSelector } from '@/store';
 import {
   fetchCampaigns,
   fetchTemplates,
+  fetchFilterOptions,
   createCampaign,
   executeCampaign,
   deleteCampaign,
@@ -60,17 +61,19 @@ function formatDate(iso?: string) {
 interface WizardProps {
   templates: YCloudTemplate[];
   loadingTemplates: boolean;
+  productos: string[];
   submitting: boolean;
   onSubmit: (payload: CreateCampaignPayload) => void;
   onClose: () => void;
 }
 
-function NewCampaignWizard({ templates, loadingTemplates, submitting, onSubmit, onClose }: WizardProps) {
+function NewCampaignWizard({ templates, loadingTemplates, productos, submitting, onSubmit, onClose }: WizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [name, setName] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<YCloudTemplate | null>(null);
   const [filterAdvisors, setFilterAdvisors] = useState<string[]>([]);
   const [filterEstados, setFilterEstados] = useState<string[]>([]);
+  const [filterProductos, setFilterProductos] = useState<string[]>([]);
 
   const inputClass =
     'w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring';
@@ -87,6 +90,12 @@ function NewCampaignWizard({ templates, loadingTemplates, submitting, onSubmit, 
     );
   }
 
+  function toggleProducto(p: string) {
+    setFilterProductos((prev) =>
+      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p],
+    );
+  }
+
   function handleSubmit() {
     if (!name.trim() || !selectedTemplate) return;
     onSubmit({
@@ -96,6 +105,7 @@ function NewCampaignWizard({ templates, loadingTemplates, submitting, onSubmit, 
       recipientFilter: {
         siguiendo: filterAdvisors.length > 0 ? filterAdvisors : undefined,
         estado: filterEstados.length > 0 ? filterEstados : undefined,
+        producto: filterProductos.length > 0 ? filterProductos : undefined,
       },
     });
   }
@@ -242,6 +252,29 @@ function NewCampaignWizard({ templates, loadingTemplates, submitting, onSubmit, 
             </div>
           </div>
 
+          {productos.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">Producto consultado</label>
+              <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
+                {productos.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => toggleProducto(p)}
+                    className={[
+                      'px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
+                      filterProductos.includes(p)
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/50',
+                    ].join(' ')}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-between gap-2 pt-2">
             <Button variant="outline" size="sm" onClick={() => setStep(1)}>Atrás</Button>
             <Button size="sm" onClick={() => setStep(3)}>Siguiente</Button>
@@ -279,6 +312,12 @@ function NewCampaignWizard({ templates, loadingTemplates, submitting, onSubmit, 
                   : 'Todos'}
               </span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Productos</span>
+              <span className="font-medium text-foreground text-right max-w-[200px]">
+                {filterProductos.length > 0 ? filterProductos.join(', ') : 'Todos'}
+              </span>
+            </div>
           </div>
 
           {selectedTemplate?.content && (
@@ -309,7 +348,7 @@ function NewCampaignWizard({ templates, loadingTemplates, submitting, onSubmit, 
 export function CampaignsPage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const { campaigns, templates, loadingCampaigns, loadingTemplates, submitting } =
+  const { campaigns, templates, filterOptions, loadingCampaigns, loadingTemplates, submitting } =
     useAppSelector((s) => s.marketing);
 
   const [showWizard, setShowWizard] = useState(false);
@@ -326,7 +365,10 @@ export function CampaignsPage() {
     if ((showWizard || showSendSingle) && templates.length === 0) {
       void dispatch(fetchTemplates());
     }
-  }, [dispatch, showWizard, showSendSingle, templates.length]);
+    if (showWizard && filterOptions.productos.length === 0) {
+      void dispatch(fetchFilterOptions());
+    }
+  }, [dispatch, showWizard, showSendSingle, templates.length, filterOptions.productos.length]);
 
   async function handleCreate(payload: CreateCampaignPayload) {
     try {
@@ -496,6 +538,7 @@ export function CampaignsPage() {
         <NewCampaignWizard
           templates={templates}
           loadingTemplates={loadingTemplates}
+          productos={filterOptions.productos}
           submitting={submitting}
           onSubmit={(p) => void handleCreate(p)}
           onClose={() => setShowWizard(false)}
