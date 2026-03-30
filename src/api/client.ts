@@ -9,6 +9,9 @@ type AuthActions = {
 let _getAuth: AuthGetter = () => ({ accessToken: null, refreshToken: null });
 let _authActions: AuthActions = { setAccessToken: () => {}, clearAuth: () => {} };
 
+// Singleton refresh: evita que requests paralelas hagan múltiples refresh simultáneos
+let _refreshPromise: Promise<string | null> | null = null;
+
 /** Call this once after creating the Redux store, in main.tsx */
 export function configureApiClient(getAuth: AuthGetter, actions: AuthActions) {
   _getAuth = getAuth;
@@ -47,18 +50,26 @@ export async function apiFetch<T = unknown>(
   const url = `${BASE_URL}${pathNorm}`;
   let res = await fetch(url, { ...options, headers });
 
-  // Access token expired → try refresh
+  // Access token expired → try refresh (singleton para evitar múltiples refreshes paralelos)
   if (res.status === 401 && !options.skipAuth && refreshToken) {
-    const refreshRes = await fetch(`${BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
-    });
+    if (!_refreshPromise) {
+      _refreshPromise = fetch(`${BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      })
+        .then(async (r) => {
+          if (!r.ok) return null;
+          const data = (await r.json()) as { accessToken: string };
+          _authActions.setAccessToken(data.accessToken);
+          return data.accessToken;
+        })
+        .finally(() => { _refreshPromise = null; });
+    }
 
-    if (refreshRes.ok) {
-      const data = (await refreshRes.json()) as { accessToken: string; refreshToken: string };
-      _authActions.setAccessToken(data.accessToken);
-      headers.set('Authorization', `Bearer ${data.accessToken}`);
+    const newToken = await _refreshPromise;
+    if (newToken) {
+      headers.set('Authorization', `Bearer ${newToken}`);
       res = await fetch(url, { ...options, headers });
     } else {
       _authActions.clearAuth();

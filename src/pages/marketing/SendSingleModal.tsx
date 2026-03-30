@@ -35,6 +35,7 @@ export function SendSingleModal({ templates, loadingTemplates, onClose }: Props)
         advisor,
         templateName: selectedTemplate.name,
         templateLanguage: selectedTemplate.language,
+        templateHeaderImageUrl: selectedTemplate.headerExample,
       });
       toast.success(`Mensaje enviado a ${result.to}`);
       onClose();
@@ -122,27 +123,24 @@ export function SendSingleModal({ templates, loadingTemplates, onClose }: Props)
                   ].join(' ')}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-foreground">{t.name}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium text-foreground">{t.name}</span>
+                      {(t.channelLabel || t.wabaId) && (
+                        <span className="shrink-0 px-1.5 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary">
+                          {t.channelLabel ?? `WABA ${t.wabaId.slice(-6)}`}
+                        </span>
+                      )}
+                    </div>
                     <span className="text-xs text-muted-foreground shrink-0">
                       {t.language} · {t.category}
                     </span>
                   </div>
-                  {t.content && (
-                    <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{t.content}</p>
-                  )}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {/* Preview si hay plantilla seleccionada */}
-        {selectedTemplate?.content && (
-          <div className="rounded-md border border-border bg-muted/30 p-3">
-            <p className="text-xs text-muted-foreground mb-1">Vista previa</p>
-            <p className="text-sm text-foreground whitespace-pre-wrap">{selectedTemplate.content}</p>
-          </div>
-        )}
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="outline" size="sm" onClick={onClose} disabled={sending}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Play, ChevronRight, Trash2, Send } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,11 +11,12 @@ import {
   executeCampaign,
   deleteCampaign,
 } from '@/store/marketing/campaignsSlice';
+import { previewByFilter } from '@/api/marketing';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { ExecuteConfirmModal } from './ExecuteConfirmModal';
 import { SendSingleModal } from './SendSingleModal';
-import type { Campaign, YCloudTemplate, CreateCampaignPayload } from '@/types/marketing.types';
+import type { Campaign, CampaignPreviewItem, YCloudTemplate, CreateCampaignPayload } from '@/types/marketing.types';
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Borrador',
@@ -67,33 +68,52 @@ interface WizardProps {
   onClose: () => void;
 }
 
+interface WaveDraft {
+  scheduledAt: string;
+  recipientCount: number;
+}
+
 function NewCampaignWizard({ templates, loadingTemplates, productos, submitting, onSubmit, onClose }: WizardProps) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [name, setName] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<YCloudTemplate | null>(null);
   const [filterAdvisors, setFilterAdvisors] = useState<string[]>([]);
   const [filterEstados, setFilterEstados] = useState<string[]>([]);
   const [filterProductos, setFilterProductos] = useState<string[]>([]);
+  const [previewItems, setPreviewItems] = useState<CampaignPreviewItem[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewSearch, setPreviewSearch] = useState('');
+  const [previewFilterSend, setPreviewFilterSend] = useState<'all' | 'send' | 'skip'>('all');
+  const [waveDrafts, setWaveDrafts] = useState<WaveDraft[]>([{ scheduledAt: '', recipientCount: 0 }]);
 
   const inputClass =
     'w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring';
 
   function toggleAdvisor(a: string) {
-    setFilterAdvisors((prev) =>
-      prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a],
-    );
+    setFilterAdvisors((prev) => prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]);
   }
-
   function toggleEstado(e: string) {
-    setFilterEstados((prev) =>
-      prev.includes(e) ? prev.filter((x) => x !== e) : [...prev, e],
-    );
+    setFilterEstados((prev) => prev.includes(e) ? prev.filter((x) => x !== e) : [...prev, e]);
+  }
+  function toggleProducto(p: string) {
+    setFilterProductos((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]);
   }
 
-  function toggleProducto(p: string) {
-    setFilterProductos((prev) =>
-      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p],
-    );
+  async function goToPreview() {
+    setLoadingPreview(true);
+    setStep(3);
+    try {
+      const items = await previewByFilter({
+        siguiendo: filterAdvisors.length > 0 ? filterAdvisors : undefined,
+        estado: filterEstados.length > 0 ? filterEstados : undefined,
+        producto: filterProductos.length > 0 ? filterProductos : undefined,
+      });
+      setPreviewItems(items);
+    } catch {
+      toast.error('No se pudo cargar la vista previa');
+    } finally {
+      setLoadingPreview(false);
+    }
   }
 
   function handleSubmit() {
@@ -102,50 +122,93 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
       name: name.trim(),
       templateName: selectedTemplate.name,
       templateLanguage: selectedTemplate.language,
+      templateHeaderImageUrl: selectedTemplate.headerExample,
       recipientFilter: {
         siguiendo: filterAdvisors.length > 0 ? filterAdvisors : undefined,
         estado: filterEstados.length > 0 ? filterEstados : undefined,
         producto: filterProductos.length > 0 ? filterProductos : undefined,
       },
+      waves: waveDrafts.map((w) => ({
+        scheduledAt: new Date(w.scheduledAt).toISOString(),
+        recipientCount: w.recipientCount,
+      })),
     });
   }
 
+  function addWave() {
+    if (waveDrafts.length >= 3) return;
+    setWaveDrafts((prev) => [...prev, { scheduledAt: '', recipientCount: 0 }]);
+  }
+
+  function removeWave(idx: number) {
+    setWaveDrafts((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateWave(idx: number, field: keyof WaveDraft, value: string | number) {
+    setWaveDrafts((prev) =>
+      prev.map((w, i) => (i === idx ? { ...w, [field]: value } : w)),
+    );
+  }
+
+  function goToConfirmStep() {
+    if (waveDrafts.some((w) => !w.scheduledAt)) {
+      toast.error('Completá la fecha y hora de cada oleada');
+      return;
+    }
+    const total = waveDrafts.reduce((s, w) => s + w.recipientCount, 0);
+    if (total !== willSendCount) {
+      toast.error('La suma de destinatarios por oleada debe coincidir con los que se enviarán');
+      return;
+    }
+    if (total === 0) return;
+    setStep(5);
+  }
+
   const canGoToStep2 = name.trim().length > 0 && selectedTemplate !== null;
-  const canSubmit = canGoToStep2;
+
+  const filteredPreview = useMemo(() => previewItems.filter((p) => {
+    if (previewFilterSend === 'send' && !p.willSend) return false;
+    if (previewFilterSend === 'skip' && p.willSend) return false;
+    if (previewSearch) {
+      const q = previewSearch.toLowerCase();
+      return p.customerName.toLowerCase().includes(q) || p.customerPhone.includes(q);
+    }
+    return true;
+  }), [previewItems, previewFilterSend, previewSearch]);
+
+  const willSendCount = previewItems.filter((p) => p.willSend).length;
+  const willSkipCount = previewItems.length - willSendCount;
+
+  const waveTotal = waveDrafts.reduce((s, w) => s + w.recipientCount, 0);
+  const waveSumError = willSendCount > 0 && waveTotal !== willSendCount;
+
+  const STEP_LABELS = ['Plantilla', 'Destinatarios', 'Vista previa', 'Oleadas', 'Confirmar'];
 
   return (
     <Dialog open onClose={onClose} title="Nueva campaña">
       {/* Indicador de pasos */}
-      <div className="flex items-center gap-2 mb-6">
-        {([1, 2, 3] as const).map((s) => (
+      <div className="flex items-center gap-2 mb-6 flex-wrap">
+        {([1, 2, 3, 4, 5] as const).map((s) => (
           <div key={s} className="flex items-center gap-2">
-            <div
-              className={[
-                'w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium',
-                step === s
-                  ? 'bg-primary text-primary-foreground'
-                  : step > s
-                  ? 'bg-primary/20 text-primary'
-                  : 'bg-muted text-muted-foreground',
-              ].join(' ')}
-            >
+            <div className={[
+              'w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium',
+              step === s ? 'bg-primary text-primary-foreground'
+                : step > s ? 'bg-primary/20 text-primary'
+                : 'bg-muted text-muted-foreground',
+            ].join(' ')}>
               {s}
             </div>
-            {s < 3 && <div className={`h-px w-8 ${step > s ? 'bg-primary/40' : 'bg-border'}`} />}
+            {s < 5 && <div className={`h-px w-6 sm:w-8 ${step > s ? 'bg-primary/40' : 'bg-border'}`} />}
           </div>
         ))}
-        <span className="text-xs text-muted-foreground ml-2">
-          {step === 1 ? 'Plantilla' : step === 2 ? 'Destinatarios' : 'Confirmar'}
-        </span>
+        <span className="text-xs text-muted-foreground ml-2 w-full sm:w-auto">{STEP_LABELS[step - 1]}</span>
       </div>
 
       {/* Paso 1 — Nombre + plantilla */}
       {step === 1 && (
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1">
-              Nombre de la campaña
-            </label>
+            <label className="block text-sm font-medium text-foreground mb-1">Nombre de la campaña</label>
             <input
               type="text"
               value={name}
@@ -156,9 +219,7 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-foreground mb-2">
-              Plantilla aprobada en YCloud
-            </label>
+            <label className="block text-sm font-medium text-foreground mb-2">Plantilla aprobada en YCloud</label>
             {loadingTemplates ? (
               <div className="space-y-2">
                 {Array.from({ length: 3 }).map((_, i) => (
@@ -182,12 +243,16 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
                     ].join(' ')}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-foreground">{t.name}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-medium text-foreground">{t.name}</span>
+                        {(t.channelLabel || t.wabaId) && (
+                          <span className="shrink-0 px-1.5 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary">
+                            {t.channelLabel ?? `WABA ${t.wabaId.slice(-6)}`}
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs text-muted-foreground shrink-0">{t.language} · {t.category}</span>
                     </div>
-                    {t.content && (
-                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{t.content}</p>
-                    )}
                   </button>
                 ))}
               </div>
@@ -196,14 +261,12 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-            <Button size="sm" disabled={!canGoToStep2} onClick={() => setStep(2)}>
-              Siguiente
-            </Button>
+            <Button size="sm" disabled={!canGoToStep2} onClick={() => setStep(2)}>Siguiente</Button>
           </div>
         </div>
       )}
 
-      {/* Paso 2 — Filtros de destinatarios */}
+      {/* Paso 2 — Filtros */}
       {step === 2 && (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
@@ -214,17 +277,9 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
             <label className="block text-sm font-medium text-foreground mb-2">Asesores</label>
             <div className="flex flex-wrap gap-2">
               {ADVISORS.map((a) => (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => toggleAdvisor(a)}
-                  className={[
-                    'px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
-                    filterAdvisors.includes(a)
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'border-border text-muted-foreground hover:border-primary/50',
-                  ].join(' ')}
-                >
+                <button key={a} type="button" onClick={() => toggleAdvisor(a)}
+                  className={['px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
+                    filterAdvisors.includes(a) ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50'].join(' ')}>
                   {a}
                 </button>
               ))}
@@ -235,17 +290,9 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
             <label className="block text-sm font-medium text-foreground mb-2">Estado del cliente</label>
             <div className="flex flex-wrap gap-2">
               {ESTADOS.map((e) => (
-                <button
-                  key={e.value}
-                  type="button"
-                  onClick={() => toggleEstado(e.value)}
-                  className={[
-                    'px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
-                    filterEstados.includes(e.value)
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'border-border text-muted-foreground hover:border-primary/50',
-                  ].join(' ')}
-                >
+                <button key={e.value} type="button" onClick={() => toggleEstado(e.value)}
+                  className={['px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
+                    filterEstados.includes(e.value) ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50'].join(' ')}>
                   {e.label}
                 </button>
               ))}
@@ -257,17 +304,9 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
               <label className="block text-sm font-medium text-foreground mb-2">Producto consultado</label>
               <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
                 {productos.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => toggleProducto(p)}
-                    className={[
-                      'px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
-                      filterProductos.includes(p)
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'border-border text-muted-foreground hover:border-primary/50',
-                    ].join(' ')}
-                  >
+                  <button key={p} type="button" onClick={() => toggleProducto(p)}
+                    className={['px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
+                      filterProductos.includes(p) ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50'].join(' ')}>
                     {p}
                   </button>
                 ))}
@@ -277,13 +316,195 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
 
           <div className="flex justify-between gap-2 pt-2">
             <Button variant="outline" size="sm" onClick={() => setStep(1)}>Atrás</Button>
-            <Button size="sm" onClick={() => setStep(3)}>Siguiente</Button>
+            <Button size="sm" onClick={() => void goToPreview()}>Ver destinatarios</Button>
           </div>
         </div>
       )}
 
-      {/* Paso 3 — Revisión y confirmación */}
+      {/* Paso 3 — Vista previa de destinatarios */}
       {step === 3 && (
+        <div className="space-y-3">
+          {loadingPreview ? (
+            <div className="space-y-2 py-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-9 animate-pulse bg-muted rounded" />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">{previewItems.length}</span> clientes ·{' '}
+                  <span className="text-green-600 dark:text-green-400 font-medium">{willSendCount} se enviarán</span>
+                  {willSkipCount > 0 && <span> · {willSkipCount} se omitirán</span>}
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Buscar…"
+                    value={previewSearch}
+                    onChange={(e) => setPreviewSearch(e.target.value)}
+                    className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring w-36"
+                  />
+                  <div className="flex rounded-md border border-border overflow-hidden text-xs">
+                    {(['all', 'send', 'skip'] as const).map((v) => (
+                      <button key={v} onClick={() => setPreviewFilterSend(v)}
+                        className={['px-2 py-1 transition-colors',
+                          previewFilterSend === v ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}>
+                        {v === 'all' ? 'Todos' : v === 'send' ? 'Envían' : 'Omiten'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border overflow-hidden">
+                <div className="overflow-y-auto max-h-72">
+                  <table className="w-full text-xs min-w-[480px]">
+                    <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                      <tr className="border-b border-border">
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Cliente</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Teléfono</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Asesor</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Estado CRM</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {filteredPreview.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">Sin resultados</td>
+                        </tr>
+                      ) : filteredPreview.map((p) => (
+                        <tr key={p.customerId} className={p.willSend ? 'hover:bg-muted/50' : 'opacity-50 hover:bg-muted/50'}>
+                          <td className="px-3 py-2 font-medium text-foreground">{p.customerName}</td>
+                          <td className="px-3 py-2 text-muted-foreground font-mono">{p.customerPhone || '—'}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{p.siguiendo}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{p.estado || '—'}</td>
+                          <td className="px-3 py-2">
+                            {p.willSend ? (
+                              <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Enviar</span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground" title={p.skipReason}>Omitir</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-between gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setStep(2)}>Atrás</Button>
+            <Button
+              size="sm"
+              disabled={willSendCount === 0}
+              onClick={() => {
+                setWaveDrafts([{ scheduledAt: '', recipientCount: willSendCount }]);
+                setStep(4);
+              }}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Paso 4 — Oleadas */}
+      {step === 4 && (
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Partí el envío en hasta 3 oleadas. La suma de destinatarios debe ser exactamente{' '}
+            <span className="font-medium text-foreground">{willSendCount}</span> (los que se enviarán según la vista previa).
+          </p>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Total asignado:{' '}
+              <span className={waveSumError ? 'text-destructive font-medium' : 'font-medium text-foreground'}>
+                {waveTotal}
+              </span>
+              {' '}/ {willSendCount}
+            </p>
+            {waveDrafts.length < 3 && (
+              <button
+                type="button"
+                onClick={addWave}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-md px-2.5 py-1.5 hover:bg-muted transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Agregar oleada
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+            {waveDrafts.map((wave, idx) => (
+              <div
+                key={idx}
+                className="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-border bg-muted/20"
+              >
+                <span className="text-xs font-medium text-muted-foreground w-14 shrink-0">
+                  Oleada {idx + 1}
+                </span>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-muted-foreground">Fecha y hora</label>
+                  <input
+                    type="datetime-local"
+                    value={wave.scheduledAt}
+                    onChange={(e) => updateWave(idx, 'scheduledAt', e.target.value)}
+                    className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-muted-foreground">Destinatarios</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={willSendCount}
+                    value={wave.recipientCount || ''}
+                    onChange={(e) => updateWave(idx, 'recipientCount', parseInt(e.target.value, 10) || 0)}
+                    className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground w-24 focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Cantidad"
+                  />
+                </div>
+                {waveDrafts.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeWave(idx)}
+                    className="ml-auto p-1.5 text-muted-foreground hover:text-destructive rounded-md hover:bg-muted transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {waveSumError && (
+            <p className="text-xs text-destructive">
+              La suma debe ser exactamente {willSendCount} destinatarios.
+            </p>
+          )}
+
+          <div className="flex justify-between gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setStep(3)}>Atrás</Button>
+            <Button
+              size="sm"
+              disabled={waveSumError || waveTotal === 0}
+              onClick={() => goToConfirmStep()}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Paso 5 — Confirmar y crear */}
+      {step === 5 && (
         <div className="space-y-4">
           <div className="rounded-md border border-border bg-muted/30 p-4 space-y-2 text-sm">
             <div className="flex justify-between">
@@ -295,21 +516,13 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
               <span className="font-medium text-foreground">{selectedTemplate?.name}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Idioma</span>
-              <span className="font-medium text-foreground">{selectedTemplate?.language}</span>
-            </div>
-            <div className="flex justify-between">
               <span className="text-muted-foreground">Asesores</span>
-              <span className="font-medium text-foreground">
-                {filterAdvisors.length > 0 ? filterAdvisors.join(', ') : 'Todos'}
-              </span>
+              <span className="font-medium text-foreground">{filterAdvisors.length > 0 ? filterAdvisors.join(', ') : 'Todos'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Estados</span>
               <span className="font-medium text-foreground text-right max-w-[200px]">
-                {filterEstados.length > 0
-                  ? filterEstados.map((e) => ESTADOS.find((x) => x.value === e)?.label ?? e).join(', ')
-                  : 'Todos'}
+                {filterEstados.length > 0 ? filterEstados.map((e) => ESTADOS.find((x) => x.value === e)?.label ?? e).join(', ') : 'Todos'}
               </span>
             </div>
             <div className="flex justify-between">
@@ -318,22 +531,39 @@ function NewCampaignWizard({ templates, loadingTemplates, productos, submitting,
                 {filterProductos.length > 0 ? filterProductos.join(', ') : 'Todos'}
               </span>
             </div>
+            <div className="flex justify-between border-t border-border pt-2 mt-2">
+              <span className="text-muted-foreground">Se enviarán a</span>
+              <span className="font-medium text-green-600 dark:text-green-400">{willSendCount} clientes</span>
+            </div>
+            <div className="border-t border-border pt-2 mt-2 space-y-1">
+              <span className="text-muted-foreground text-xs">Oleadas ({waveDrafts.length})</span>
+              {waveDrafts.map((w, i) => (
+                <div key={i} className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">#{i + 1}</span>
+                  <span className="text-foreground">
+                    {w.recipientCount} dest. ·{' '}
+                    {w.scheduledAt
+                      ? new Date(w.scheduledAt).toLocaleString('es-AR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {selectedTemplate?.content && (
-            <div className="rounded-md border border-border p-3">
-              <p className="text-xs text-muted-foreground mb-1">Vista previa del mensaje</p>
-              <p className="text-sm text-foreground whitespace-pre-wrap">{selectedTemplate.content}</p>
-            </div>
-          )}
-
           <p className="text-xs text-muted-foreground">
-            La campaña se creará como borrador. Podrás ejecutarla desde el panel de campañas.
+            La campaña se creará como borrador con las oleadas guardadas. Podrás ejecutarla desde el detalle o el listado.
           </p>
 
           <div className="flex justify-between gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setStep(2)}>Atrás</Button>
-            <Button size="sm" loading={submitting} disabled={!canSubmit} onClick={handleSubmit}>
+            <Button variant="outline" size="sm" onClick={() => setStep(4)}>Atrás</Button>
+            <Button size="sm" loading={submitting} disabled={!name.trim() || !selectedTemplate} onClick={handleSubmit}>
               Crear campaña
             </Button>
           </div>
