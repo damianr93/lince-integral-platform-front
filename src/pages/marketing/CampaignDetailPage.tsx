@@ -264,6 +264,20 @@ export function CampaignDetailPage() {
     );
   }
 
+  const advisors = useMemo(() => [...new Set(preview.map((p) => p.siguiendo))].sort(), [preview]);
+  const estados = useMemo(() => [...new Set(preview.map((p) => p.estado).filter(Boolean))].sort(), [preview]);
+  const filteredPreview = useMemo(() => preview.filter((p) => {
+    if (filterAdvisor && p.siguiendo !== filterAdvisor) return false;
+    if (filterEstado && p.estado !== filterEstado) return false;
+    if (filterSend === 'send' && !p.willSend) return false;
+    if (filterSend === 'skip' && p.willSend) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return p.customerName.toLowerCase().includes(q) || p.customerPhone.includes(q);
+    }
+    return true;
+  }), [preview, filterAdvisor, filterEstado, filterSend, search]);
+
   if (loadingCurrent || !currentCampaign) {
     return (
       <div className="p-4 sm:p-6">
@@ -286,20 +300,6 @@ export function CampaignDetailPage() {
     acc[r.status].push(r);
     return acc;
   }, {});
-
-  const advisors = useMemo(() => [...new Set(preview.map((p) => p.siguiendo))].sort(), [preview]);
-  const estados = useMemo(() => [...new Set(preview.map((p) => p.estado).filter(Boolean))].sort(), [preview]);
-  const filteredPreview = useMemo(() => preview.filter((p) => {
-    if (filterAdvisor && p.siguiendo !== filterAdvisor) return false;
-    if (filterEstado && p.estado !== filterEstado) return false;
-    if (filterSend === 'send' && !p.willSend) return false;
-    if (filterSend === 'skip' && p.willSend) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return p.customerName.toLowerCase().includes(q) || p.customerPhone.includes(q);
-    }
-    return true;
-  }), [preview, filterAdvisor, filterEstado, filterSend, search]);
 
   const willSendCount = preview.filter((p) => p.willSend).length;
   const willSkipCount = preview.length - willSendCount;
