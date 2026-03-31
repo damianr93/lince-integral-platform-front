@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, RefreshCw, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Play, RefreshCw, Plus, Trash2, Pencil, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
@@ -9,7 +9,7 @@ import {
   executeCampaign,
   clearCurrentCampaign,
 } from '@/store/marketing/campaignsSlice';
-import { getCampaignPreview, configureWaves, getCampaignLogs } from '@/api/marketing';
+import { getCampaignPreview, configureWaves, getCampaignLogs, rescheduleWave } from '@/api/marketing';
 import { Button } from '@/components/ui/Button';
 import { ExecuteConfirmModal } from './ExecuteConfirmModal';
 import type { CampaignRecipient, CampaignPreviewItem, CampaignLog, CampaignWave } from '@/types/marketing.types';
@@ -70,6 +70,7 @@ const LOG_EVENT_LABELS: Record<string, string> = {
   WAVE_STARTED: 'Oleada iniciada',
   WAVE_COMPLETED: 'Oleada completada',
   WAVE_FAILED: 'Oleada fallida',
+  WAVE_RESCHEDULED: 'Oleada reprogramada',
   MESSAGE_SENT: 'Mensaje enviado',
   MESSAGE_FAILED: 'Mensaje fallido',
   MESSAGE_RETRY: 'Reintento',
@@ -131,6 +132,11 @@ export function CampaignDetailPage() {
   // Logs
   const [logs, setLogs] = useState<CampaignLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // Reprogramar oleada
+  const [editingWave, setEditingWave] = useState<number | null>(null);
+  const [editingWaveDate, setEditingWaveDate] = useState('');
+  const [savingReschedule, setSavingReschedule] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -246,6 +252,21 @@ export function CampaignDetailPage() {
       toast.error('Error al guardar las oleadas');
     } finally {
       setSavingWaves(false);
+    }
+  }
+
+  async function handleRescheduleWave(waveNumber: number) {
+    if (!id || !editingWaveDate) return;
+    setSavingReschedule(true);
+    try {
+      await rescheduleWave(id, waveNumber, new Date(editingWaveDate).toISOString());
+      toast.success(`Oleada ${waveNumber} reprogramada`);
+      setEditingWave(null);
+      void dispatch(fetchCampaign(id));
+    } catch {
+      toast.error('Error al reprogramar la oleada');
+    } finally {
+      setSavingReschedule(false);
     }
   }
 
@@ -633,7 +654,50 @@ export function CampaignDetailPage() {
                 {c.waves.map((wave: CampaignWave) => (
                   <tr key={wave.waveNumber} className="hover:bg-muted/50">
                     <td className="px-4 py-2.5 font-medium text-foreground">{wave.waveNumber}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{formatDate(wave.scheduledAt)}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
+                      {editingWave === wave.waveNumber ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="datetime-local"
+                            value={editingWaveDate}
+                            onChange={(e) => setEditingWaveDate(e.target.value)}
+                            className="rounded-md border border-border bg-background px-2 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                          <button
+                            onClick={() => void handleRescheduleWave(wave.waveNumber)}
+                            disabled={savingReschedule || !editingWaveDate}
+                            className="p-1 text-green-600 hover:text-green-700 disabled:opacity-50"
+                            title="Confirmar"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setEditingWave(null)}
+                            disabled={savingReschedule}
+                            className="p-1 text-muted-foreground hover:text-foreground"
+                            title="Cancelar"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span>{formatDate(wave.scheduledAt)}</span>
+                          {isRunning && wave.status === 'SCHEDULED' && (
+                            <button
+                              onClick={() => {
+                                setEditingWave(wave.waveNumber);
+                                setEditingWaveDate(toLocalDatetimeValue(wave.scheduledAt));
+                              }}
+                              className="p-1 text-muted-foreground hover:text-foreground rounded"
+                              title="Reprogramar"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-muted-foreground">{wave.recipientCount}</td>
                     <td className="px-4 py-2.5">
                       <span className="text-green-600 dark:text-green-400 font-medium">{wave.sentCount}</span>
