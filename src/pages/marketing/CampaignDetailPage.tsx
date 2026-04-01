@@ -9,7 +9,7 @@ import {
   executeCampaign,
   clearCurrentCampaign,
 } from '@/store/marketing/campaignsSlice';
-import { getCampaignPreview, configureWaves, getCampaignLogs, rescheduleWave } from '@/api/marketing';
+import { getCampaignPreview, configureWaves, getCampaignLogs, rescheduleWave, reconfigureScheduledWaves } from '@/api/marketing';
 import { Button } from '@/components/ui/Button';
 import { ExecuteConfirmModal } from './ExecuteConfirmModal';
 import type { CampaignRecipient, CampaignPreviewItem, CampaignLog, CampaignWave } from '@/types/marketing.types';
@@ -133,10 +133,15 @@ export function CampaignDetailPage() {
   const [logs, setLogs] = useState<CampaignLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
 
-  // Reprogramar oleada
+  // Reprogramar oleada (fecha)
   const [editingWave, setEditingWave] = useState<number | null>(null);
   const [editingWaveDate, setEditingWaveDate] = useState('');
   const [savingReschedule, setSavingReschedule] = useState(false);
+
+  // Reconfigurar oleadas programadas (cantidad + fecha)
+  const [reconfiguringWaves, setReconfiguringWaves] = useState(false);
+  const [reconfWaveDrafts, setReconfWaveDrafts] = useState<WaveDraft[]>([]);
+  const [savingReconf, setSavingReconf] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -270,6 +275,43 @@ export function CampaignDetailPage() {
     }
   }
 
+  function openReconfigure() {
+    if (!currentCampaign) return;
+    const scheduled = (currentCampaign.waves ?? []).filter((w) => w.status === 'SCHEDULED');
+    setReconfWaveDrafts(
+      scheduled.map((w) => ({
+        scheduledAt: toLocalDatetimeValue(w.scheduledAt),
+        recipientCount: Math.max(0, w.recipientCount - w.sentCount - w.failedCount),
+      })),
+    );
+    setReconfiguringWaves(true);
+  }
+
+  async function handleSaveReconf() {
+    if (!id) return;
+    if (reconfWaveDrafts.some((w) => !w.scheduledAt)) {
+      toast.error('Completá la fecha y hora de cada oleada');
+      return;
+    }
+    setSavingReconf(true);
+    try {
+      await reconfigureScheduledWaves(
+        id,
+        reconfWaveDrafts.map((w) => ({
+          scheduledAt: new Date(w.scheduledAt).toISOString(),
+          recipientCount: w.recipientCount,
+        })),
+      );
+      toast.success('Oleadas actualizadas');
+      setReconfiguringWaves(false);
+      void dispatch(fetchCampaign(id));
+    } catch {
+      toast.error('Error al reconfigurar las oleadas');
+    } finally {
+      setSavingReconf(false);
+    }
+  }
+
   function addWave() {
     if (waveDrafts.length >= 3) return;
     setWaveDrafts((prev) => [...prev, { scheduledAt: '', recipientCount: 0 }]);
@@ -329,6 +371,14 @@ export function CampaignDetailPage() {
   const waveCountError =
     isDraft && waveTarget > 0 && waveTotal !== waveTarget
       ? `La suma (${waveTotal}) debe coincidir con destinatarios a enviar (${waveTarget})`
+      : '';
+
+  const scheduledWaves = (c.waves ?? []).filter((w) => w.status === 'SCHEDULED');
+  const pendingInScheduled = scheduledWaves.reduce((s, w) => s + w.recipientCount - w.sentCount - w.failedCount, 0);
+  const reconfTotal = reconfWaveDrafts.reduce((s, w) => s + w.recipientCount, 0);
+  const reconfError =
+    reconfTotal !== pendingInScheduled
+      ? `La suma (${reconfTotal}) debe coincidir con pendientes en oleadas programadas (${pendingInScheduled})`
       : '';
 
   return (
@@ -722,6 +772,99 @@ export function CampaignDetailPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Reconfigurar oleadas programadas — solo RUNNING con waves SCHEDULED */}
+      {isRunning && scheduledWaves.length > 0 && (
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-medium text-foreground">Reconfigurar oleadas programadas</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {scheduledWaves.length} oleada{scheduledWaves.length > 1 ? 's' : ''} pendiente{scheduledWaves.length > 1 ? 's' : ''} ·{' '}
+                {pendingInScheduled} destinatarios por asignar
+              </p>
+            </div>
+            {!reconfiguringWaves ? (
+              <Button size="sm" variant="outline" onClick={openReconfigure}>
+                <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                Editar
+              </Button>
+            ) : (
+              <button
+                onClick={() => setReconfiguringWaves(false)}
+                className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {reconfiguringWaves && (
+            <div className="p-4 space-y-3">
+              {reconfWaveDrafts.map((wave, idx) => (
+                <div key={idx} className="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                  <span className="text-xs font-medium text-muted-foreground w-16 shrink-0">
+                    Oleada {idx + 1}
+                  </span>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-muted-foreground">Fecha y hora</label>
+                    <input
+                      type="datetime-local"
+                      value={wave.scheduledAt}
+                      onChange={(e) => setReconfWaveDrafts((prev) => prev.map((w, i) => i === idx ? { ...w, scheduledAt: e.target.value } : w))}
+                      className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-muted-foreground">Destinatarios</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={wave.recipientCount || ''}
+                      onChange={(e) => setReconfWaveDrafts((prev) => prev.map((w, i) => i === idx ? { ...w, recipientCount: parseInt(e.target.value) || 0 } : w))}
+                      className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground w-24 focus:outline-none focus:ring-1 focus:ring-ring"
+                      placeholder="Cantidad"
+                    />
+                  </div>
+                  {reconfWaveDrafts.length > 1 && (
+                    <button
+                      onClick={() => setReconfWaveDrafts((prev) => prev.filter((_, i) => i !== idx))}
+                      className="ml-auto p-1.5 text-muted-foreground hover:text-destructive rounded-md hover:bg-muted transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {reconfWaveDrafts.length < 5 && (
+                <button
+                  onClick={() => setReconfWaveDrafts((prev) => [...prev, { scheduledAt: '', recipientCount: 0 }])}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-md px-3 py-2 w-full justify-center hover:bg-muted transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Agregar oleada
+                </button>
+              )}
+
+              {reconfError && <p className="text-xs text-destructive">{reconfError}</p>}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button size="sm" variant="ghost" onClick={() => setReconfiguringWaves(false)} disabled={savingReconf}>
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void handleSaveReconf()}
+                  disabled={savingReconf || !!reconfError || reconfWaveDrafts.some((w) => !w.scheduledAt)}
+                >
+                  {savingReconf ? 'Guardando…' : 'Guardar cambios'}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -65,5 +65,10 @@ export const getCampaignWaves = (campaignId: string) =>
 export const rescheduleWave = (campaignId: string, waveNumber: number, scheduledAt: string) =>
   api.patch<Campaign>(`/marketing/campaigns/${campaignId}/waves/${waveNumber}/reschedule`, { scheduledAt });
 
+export const reconfigureScheduledWaves = (
+  campaignId: string,
+  waves: { scheduledAt: string; recipientCount: number }[],
+) => api.patch<Campaign>(`/marketing/campaigns/${campaignId}/waves/reconfigure`, { waves });
+
 export const getCampaignLogs = (campaignId: string) =>
   api.get<CampaignLog[]>(`/marketing/campaigns/${campaignId}/logs`);
