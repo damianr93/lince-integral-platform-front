@@ -1,100 +1,513 @@
 /**
- * Panel ADMINISTRATIVO — Carga y corrección de facturas
- * Maquetado — Pendiente de integración con backend OCR
+ * OcrFacturasPage — Panel ADMINISTRATIVO
+ *
+ * Flujo completo:
+ *  1. Upload de factura (PDF o imagen) con presigned S3 URL
+ *  2. OCR asíncrono → polling hasta que termina
+ *  3. Listado de facturas propias con estado
+ *  4. Corrección de campos extraídos incorrectamente
+ *
+ * Credenciales:
+ *  - Sin S3: error claro "Servicio de almacenamiento no disponible"
+ *  - Sin Vision: factura queda en CON_ERRORES, ADMINISTRATIVO puede corregir campos manualmente
  */
 
-import { useState } from 'react';
-import { Upload, FileText, Edit2, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { Upload, FileText, Edit2, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import * as ocrApi from '@/api/ocr';
+import { useAppDispatch, useAppSelector } from '@/store';
+import { fetchMyFacturas, updateDocumentFields, clearCurrent, fetchDocument } from '@/store/ocr/documentsSlice';
+import type { FilterDocumentsParams, OcrDocument } from '@/types/ocr.types';
+import { DocumentStatus, DocumentType } from '@/types/ocr.types';
+import { StatusBadge } from './components/StatusBadge';
+import { OcrDemoToolbar } from './components/OcrDemoToolbar';
+import {
+  OCR_DEMO_STORAGE_FACTURAS,
+  createDemoFacturasForUser,
+  isOcrDemoDocumentId,
+  paginateDemo,
+} from './demo/ocrDemoMocks';
 
-const MOCK_FACTURAS = [
-  {
-    id: '1', preview: 'Factura #5678', status: 'CON_ERRORES', date: '25/03/2026',
-    fields: { numero: '5678', fecha: '2026-03-25', proveedor: 'Proveedor XYZ', monto: '', cuit: '20-12345678-9' },
-    errors: ['Monto no detectado'],
-  },
-  {
-    id: '2', preview: 'Factura #5677', status: 'VALIDO', date: '24/03/2026',
-    fields: { numero: '5677', fecha: '2026-03-24', proveedor: 'Proveedor ABC', monto: '$45.200', cuit: '30-87654321-0' },
-    errors: [],
-  },
-  {
-    id: '3', preview: 'Factura #5676', status: 'APROBADO', date: '23/03/2026',
-    fields: { numero: '5676', fecha: '2026-03-23', proveedor: 'Distribuidora LA', monto: '$12.500', cuit: '27-11111111-1' },
-    errors: [],
-  },
-];
+// ── Tipos ─────────────────────────────────────────────────────────────────────
 
-type Factura = typeof MOCK_FACTURAS[0];
+type UploadStep = 'idle' | 'uploading' | 'polling' | 'done' | 'error';
 
-function StatusBadge({ status }: { status: string }) {
-  const config: Record<string, { label: string; className: string; icon: React.ReactNode }> = {
-    VALIDO: { label: 'Válido', className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', icon: <CheckCircle className="h-3 w-3" /> },
-    CON_ERRORES: { label: 'Con errores', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400', icon: <AlertTriangle className="h-3 w-3" /> },
-    APROBADO: { label: 'Aprobado', className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', icon: <CheckCircle className="h-3 w-3" /> },
-    REVISION_PENDIENTE: { label: 'En revisión', className: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400', icon: <Clock className="h-3 w-3" /> },
-    PROCESANDO: { label: 'Procesando', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: <Clock className="h-3 w-3" /> },
+const EDITABLE_STATUSES = [DocumentStatus.CON_ERRORES, DocumentStatus.VALIDO, DocumentStatus.REVISION_PENDIENTE];
+const POLL_INTERVAL_MS  = 2500;
+const POLL_MAX_RETRIES  = 24;
+
+// ── Componente principal ──────────────────────────────────────────────────────
+
+export function OcrFacturasPage() {
+  const dispatch = useAppDispatch();
+  const user = useAppSelector((s) => s.auth.user);
+  const { myFacturas, loading, submitting, error } = useAppSelector((s) => s.ocrDocuments);
+
+  const [uploadStep, setUploadStep]     = useState<UploadStep>('idle');
+  const [uploadPct, setUploadPct]       = useState(0);
+  const [pollStatus, setPollStatus]     = useState<DocumentStatus | null>(null);
+  const [lastDocId, setLastDocId]       = useState<string | null>(null);
+  const [detailDoc, setDetailDoc]       = useState<OcrDocument | null>(null);
+  const [filters, setFilters]           = useState<FilterDocumentsParams>({ page: 1, limit: 10 });
+
+  /* DEMO-OCR-MOCK */
+  const uid = user?.id ?? '00000000-0000-0000-0000-000000000000';
+  const [demoFacturasActive, setDemoFacturasActive] = useState(
+    () => typeof localStorage !== 'undefined' && localStorage.getItem(OCR_DEMO_STORAGE_FACTURAS) === '1',
+  );
+  const [demoFacturas, setDemoFacturas] = useState<OcrDocument[]>(() =>
+    typeof localStorage !== 'undefined' && localStorage.getItem(OCR_DEMO_STORAGE_FACTURAS) === '1'
+      ? createDemoFacturasForUser(uid)
+      : [],
+  );
+
+  const setFacturasDemoMode = (on: boolean) => {
+    if (on) {
+      localStorage.setItem(OCR_DEMO_STORAGE_FACTURAS, '1');
+      setDemoFacturas(createDemoFacturasForUser(uid));
+      setDemoFacturasActive(true);
+    } else {
+      localStorage.removeItem(OCR_DEMO_STORAGE_FACTURAS);
+      setDemoFacturas([]);
+      setDemoFacturasActive(false);
+      dispatch(fetchMyFacturas(filters));
+    }
   };
-  const c = config[status] ?? config.PROCESANDO;
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (demoFacturasActive) {
+      setDemoFacturas(createDemoFacturasForUser(uid));
+    }
+  }, [uid, demoFacturasActive]);
+
+  useEffect(() => {
+    if (demoFacturasActive) return;
+    dispatch(fetchMyFacturas(filters));
+  }, [dispatch, filters, demoFacturasActive]);
+
+  // ── Upload ────────────────────────────────────────────────────────────────
+
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const contentType = file.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
+    const allowed     = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowed.includes(contentType)) {
+      toast.error('Formato no permitido. Subí una imagen (JPG, PNG, WEBP) o un PDF.');
+      return;
+    }
+
+    setUploadStep('uploading');
+    setUploadPct(0);
+
+    try {
+      const { uploadUrl, documentId } = await ocrApi.requestUploadUrl(DocumentType.FACTURA, contentType);
+      setLastDocId(documentId);
+
+      await ocrApi.uploadToS3(uploadUrl, file, contentType, setUploadPct);
+      await ocrApi.confirmUpload(documentId);
+
+      setUploadStep('polling');
+      setPollStatus(DocumentStatus.PROCESANDO);
+      await pollStatus_local(documentId);
+
+    } catch (err) {
+      const msg = (err as Error).message;
+      const isStorage = msg.includes('S3') || msg.includes('almacenamiento') || msg.includes('AWS');
+      toast.error(isStorage
+        ? 'Servicio de almacenamiento no disponible. Contactar al administrador.'
+        : `Error al subir: ${msg}`);
+      setUploadStep('error');
+    }
+  }, []);
+
+  const pollStatus_local = async (docId: string) => {
+    for (let i = 0; i < POLL_MAX_RETRIES; i++) {
+      await delay(POLL_INTERVAL_MS);
+      try {
+        const { status } = await ocrApi.getDocumentStatus(docId);
+        setPollStatus(status);
+        if (status !== DocumentStatus.PROCESANDO && status !== DocumentStatus.PENDIENTE) {
+          setUploadStep('done');
+          dispatch(fetchMyFacturas(filters));
+          if (status === DocumentStatus.VALIDO) {
+            toast.success('Factura procesada correctamente');
+          } else if (status === DocumentStatus.CON_ERRORES) {
+            toast.warning('La factura tiene errores — podés corregir los campos en la tabla');
+          }
+          return;
+        }
+      } catch { /* continuar */ }
+    }
+    setUploadStep('done');
+    toast.warning('Procesamiento tardó más de lo esperado. Revisá el estado en la tabla.');
+  };
+
+  const resetUpload = () => {
+    setUploadStep('idle');
+    setUploadPct(0);
+    setPollStatus(null);
+    setLastDocId(null);
+  };
+
+  // ── Detalle / Corrección ──────────────────────────────────────────────────
+
+  const openDetail = async (doc: OcrDocument) => {
+    if (isOcrDemoDocumentId(doc.id)) {
+      dispatch(clearCurrent());
+    } else {
+      await dispatch(fetchDocument(doc.id));
+    }
+    setDetailDoc(doc);
+  };
+
+  const closeDetail = () => {
+    setDetailDoc(null);
+    dispatch(clearCurrent());
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const demoPaged = demoFacturasActive
+    ? paginateDemo(demoFacturas, filters.page ?? 1, filters.limit ?? 10)
+    : null;
+  const docs  = demoFacturasActive ? (demoPaged?.slice ?? []) : (myFacturas?.items ?? []);
+  const total = demoFacturasActive ? (demoPaged?.total ?? 0) : (myFacturas?.total ?? 0);
+  const page  = demoFacturasActive ? (filters.page ?? 1) : (myFacturas?.page ?? filters.page ?? 1);
+  const pages = demoFacturasActive ? (demoPaged?.pages ?? 1) : (myFacturas?.pages ?? 1);
+  const listLoading = demoFacturasActive ? false : loading;
+
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${c.className}`}>
-      {c.icon} {c.label}
-    </span>
+    <div className="p-4 sm:p-6 space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold text-foreground">Mis Facturas</h1>
+        <p className="text-sm text-muted-foreground mt-1">Cargá facturas y corregí los campos extraídos por OCR</p>
+      </div>
+
+      {/* DEMO-OCR-MOCK */}
+      <OcrDemoToolbar
+        active={demoFacturasActive}
+        onToggle={setFacturasDemoMode}
+        contextLabel="Demo facturas post-OCR (administrativo)"
+      />
+
+      {error && !demoFacturasActive && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
+          {error}
+        </div>
+      )}
+
+      {/* ── Zona de upload ─────────────────────────────────────────────── */}
+      {uploadStep === 'idle' && (
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors"
+        >
+          <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+          <p className="text-sm font-semibold text-foreground">Subir factura</p>
+          <p className="text-xs text-muted-foreground mt-1">PDF o imagen · El sistema extrae los campos automáticamente</p>
+          <button className="mt-4 px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
+            Seleccionar archivo
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+        </div>
+      )}
+
+      {uploadStep === 'uploading' && (
+        <div className="border border-border rounded-xl p-6 text-center space-y-4">
+          <Upload className="h-10 w-10 mx-auto text-primary animate-bounce" />
+          <p className="text-sm font-medium text-foreground">Subiendo factura…</p>
+          <div className="w-full bg-muted rounded-full h-2">
+            <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${uploadPct}%` }} />
+          </div>
+          <p className="text-xs text-muted-foreground">{uploadPct}%</p>
+        </div>
+      )}
+
+      {uploadStep === 'polling' && (
+        <div className="border border-border rounded-xl p-6 text-center space-y-3">
+          <RefreshCw className="h-10 w-10 mx-auto text-blue-500 animate-spin" />
+          <p className="text-sm font-medium text-foreground">Procesando OCR…</p>
+          <p className="text-xs text-muted-foreground">Extrayendo campos de la factura. Puede tardar hasta 30 segundos.</p>
+          {pollStatus && <StatusBadge status={pollStatus} />}
+        </div>
+      )}
+
+      {(uploadStep === 'done' || uploadStep === 'error') && (
+        <div className="border border-border rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {pollStatus && <StatusBadge status={pollStatus} />}
+            {uploadStep === 'error' && <span className="text-red-600">Error al procesar</span>}
+          </div>
+          <button onClick={resetUpload} className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-accent">
+            Subir otra
+          </button>
+        </div>
+      )}
+
+      {/* ── Lista de facturas ─────────────────────────────────────────────── */}
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-foreground">Facturas cargadas</h2>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-muted-foreground">{total} facturas</p>
+            <button
+              onClick={() =>
+                demoFacturasActive
+                  ? setDemoFacturas(createDemoFacturasForUser(uid))
+                  : dispatch(fetchMyFacturas(filters))
+              }
+              disabled={listLoading}
+              className="p-1 rounded hover:bg-accent disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${listLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[480px]">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">ID</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Estado OCR</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Fecha</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Total</th>
+                <th className="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {listLoading && docs.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                    <RefreshCw className="h-4 w-4 animate-spin inline mr-2" />Cargando…
+                  </td>
+                </tr>
+              ) : docs.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                    Todavía no subiste ninguna factura
+                  </td>
+                </tr>
+              ) : (
+                docs.map((f) => (
+                  <tr key={f.id} className="hover:bg-muted/50">
+                    <td className="px-4 py-2.5 font-medium text-foreground flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="font-mono text-xs">{f.id.slice(0, 8)}…</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <StatusBadge status={f.status} />
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground text-xs">
+                      {new Date(f.createdAt).toLocaleDateString('es-AR')}
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground text-xs">
+                      {f.extractedData?.['total'] || '—'}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => openDetail(f)}
+                        className="px-2 py-1 text-xs rounded bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1"
+                      >
+                        {EDITABLE_STATUSES.includes(f.status)
+                          ? <><Edit2 className="h-3 w-3" /> Corregir</>
+                          : 'Ver detalle'}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Paginación */}
+      {pages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <p className="text-muted-foreground">Página {page} de {pages}</p>
+          <div className="flex gap-1">
+            <button
+              disabled={page <= 1}
+              onClick={() => setFilters((f) => ({ ...f, page: (f.page ?? 1) - 1 }))}
+              className="p-1.5 rounded border border-border hover:bg-accent disabled:opacity-40"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              disabled={page >= pages}
+              onClick={() => setFilters((f) => ({ ...f, page: (f.page ?? 1) + 1 }))}
+              className="p-1.5 rounded border border-border hover:bg-accent disabled:opacity-40"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-900/20 dark:border-blue-800">
+        <p className="text-xs text-blue-700 dark:text-blue-400 font-medium mb-1">Corrección de campos</p>
+        <p className="text-xs text-blue-600 dark:text-blue-400">
+          Podés corregir campos mal extraídos en facturas con estado "Con errores" o "Válido".
+          La aprobación final siempre la realiza el equipo ADMIN.
+        </p>
+      </div>
+
+      {/* Modal de corrección */}
+      {detailDoc && (
+        <CorrectFieldsModal
+          doc={
+            isOcrDemoDocumentId(detailDoc.id)
+              ? demoFacturas.find((d) => d.id === detailDoc.id) ?? detailDoc
+              : detailDoc
+          }
+          onClose={closeDetail}
+          onSave={async (fields) => {
+            if (isOcrDemoDocumentId(detailDoc.id)) {
+              const ts = new Date().toISOString();
+              setDemoFacturas((prev) =>
+                prev.map((d) =>
+                  d.id === detailDoc.id
+                    ? {
+                        ...d,
+                        extractedData: { ...(d.extractedData ?? {}), ...fields },
+                        correctedAt: ts,
+                        correctedBy: uid,
+                        status:
+                          d.status === DocumentStatus.CON_ERRORES
+                            ? DocumentStatus.REVISION_PENDIENTE
+                            : d.status,
+                      }
+                    : d,
+                ),
+              );
+              toast.success('Campos guardados (demo)');
+              closeDetail();
+              return;
+            }
+            const result = await dispatch(updateDocumentFields({ id: detailDoc.id, fields }));
+            if (updateDocumentFields.fulfilled.match(result)) {
+              toast.success('Campos guardados');
+              closeDetail();
+              dispatch(fetchMyFacturas(filters));
+            } else {
+              toast.error(String(result.error?.message ?? 'Error al guardar'));
+            }
+          }}
+          submitting={isOcrDemoDocumentId(detailDoc.id) ? false : submitting}
+        />
+      )}
+    </div>
   );
 }
 
-function DetailPanel({ factura, onClose }: { factura: Factura; onClose: () => void }) {
-  const [fields, setFields] = useState(factura.fields);
-  const canEdit = factura.status === 'CON_ERRORES' || factura.status === 'VALIDO';
+// ── Modal de corrección de campos ─────────────────────────────────────────────
+
+function CorrectFieldsModal({
+  doc, onClose, onSave, submitting,
+}: {
+  doc:        OcrDocument;
+  onClose:    () => void;
+  onSave:     (fields: Record<string, string>) => void;
+  submitting: boolean;
+}) {
+  const canEdit = EDITABLE_STATUSES.includes(doc.status);
+  const [fields, setFields] = useState<Record<string, string>>(doc.extractedData ?? {});
+
+  // Default fields si extractedData está vacío (OCR no configurado)
+  const defaultFields = doc.type === DocumentType.FACTURA
+    ? { numero: '', fecha: '', proveedor: '', cuit: '', neto: '', iva: '', total: '', tipo: '' }
+    : { numero: '', fecha: '', proveedor: '', destinatario: '', total: '' };
+
+  const allFields = { ...defaultFields, ...fields };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
       <div className="bg-card border border-border rounded-lg w-full max-w-xl shadow-xl my-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-base font-semibold text-foreground">{factura.preview}</h2>
-          <button onClick={onClose} className="text-sm text-muted-foreground hover:text-foreground">✕</button>
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold text-foreground">
+              {doc.type} — {doc.id.slice(0, 8)}…
+            </h2>
+            <StatusBadge status={doc.status} />
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-lg">✕</button>
         </div>
 
-        <div className="px-6 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
-          {/* Image placeholder */}
-          <div className="bg-muted/40 rounded-lg h-40 flex items-center justify-center border border-border">
-            <div className="text-center">
-              <FileText className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
-              <p className="text-xs text-muted-foreground">Imagen del documento</p>
-              <p className="text-xs text-muted-foreground opacity-60">(S3 presigned URL)</p>
+        <div className="px-6 py-4 space-y-4 max-h-[65vh] overflow-y-auto">
+          {/* Preview o placeholder */}
+          {doc.viewUrl ? (
+            doc.s3Key.endsWith('.pdf') ? (
+              <div className="bg-muted/40 rounded-lg h-32 flex items-center justify-center border border-border">
+                <a href={doc.viewUrl} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
+                  Abrir PDF
+                </a>
+              </div>
+            ) : (
+              <img src={doc.viewUrl} alt="Factura" className="w-full rounded-lg border border-border object-contain max-h-48" />
+            )
+          ) : (
+            <div className="bg-muted/40 rounded-lg h-32 flex items-center justify-center border border-border">
+              <p className="text-xs text-muted-foreground">Vista previa no disponible</p>
             </div>
-          </div>
+          )}
 
-          {/* Error alerts */}
-          {factura.errors.length > 0 && (
+          {/* Errores OCR */}
+          {doc.validationErrors && doc.validationErrors.length > 0 && (
             <div className="p-3 rounded-lg bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800">
-              <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-1">Campos con errores OCR:</p>
-              {factura.errors.map((e) => (
-                <p key={e} className="text-xs text-red-600 dark:text-red-400">• {e}</p>
+              <div className="flex items-center gap-1.5 mb-1">
+                <AlertTriangle className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
+                <p className="text-xs font-medium text-red-700 dark:text-red-400">Campos con errores OCR</p>
+              </div>
+              {doc.validationErrors.map((e, i) => (
+                <p key={i} className="text-xs text-red-600 dark:text-red-400">• {e}</p>
               ))}
             </div>
           )}
 
-          {/* Editable fields */}
+          {/* Campos editables */}
           <div className="space-y-3">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Campos extraídos por OCR</p>
-            {Object.entries(fields).map(([key, value]) => (
-              <div key={key}>
-                <label className="block text-xs font-medium text-foreground mb-1 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
-                <input
-                  type="text"
-                  value={value}
-                  disabled={!canEdit}
-                  onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
-                  className={[
-                    'w-full rounded-md border px-3 py-2 text-sm',
-                    !value && factura.errors.length > 0
-                      ? 'border-red-300 bg-red-50 dark:bg-red-900/10 dark:border-red-700'
-                      : 'border-border bg-background',
-                    !canEdit ? 'opacity-60 cursor-not-allowed' : '',
-                  ].join(' ')}
-                />
-              </div>
-            ))}
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Campos extraídos por OCR
+              {!canEdit && ' (solo lectura)'}
+            </p>
+            {Object.entries(allFields).map(([key, value]) => {
+              const hasError = doc.validationErrors?.some((e) =>
+                e.toLowerCase().includes(key.toLowerCase()),
+              );
+              return (
+                <div key={key}>
+                  <label className="block text-xs font-medium text-foreground mb-1 capitalize">
+                    {key.replace(/([A-Z])/g, ' $1')}
+                  </label>
+                  <input
+                    type="text"
+                    value={fields[key] ?? value}
+                    disabled={!canEdit}
+                    onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+                    className={[
+                      'w-full rounded-md border px-3 py-2 text-sm',
+                      hasError
+                        ? 'border-red-300 bg-red-50 dark:bg-red-900/10 dark:border-red-700'
+                        : 'border-border bg-background',
+                      !canEdit ? 'opacity-60 cursor-not-allowed' : '',
+                    ].join(' ')}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -103,9 +516,13 @@ function DetailPanel({ factura, onClose }: { factura: Factura; onClose: () => vo
             Cerrar
           </button>
           {canEdit && (
-            <button className="px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2">
+            <button
+              onClick={() => onSave(fields)}
+              disabled={submitting}
+              className="px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+            >
               <Edit2 className="h-3.5 w-3.5" />
-              Guardar correcciones
+              {submitting ? 'Guardando…' : 'Guardar correcciones'}
             </button>
           )}
         </div>
@@ -114,82 +531,6 @@ function DetailPanel({ factura, onClose }: { factura: Factura; onClose: () => vo
   );
 }
 
-export function OcrFacturasPage() {
-  const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null);
-
-  return (
-    <div className="p-4 sm:p-6 space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold text-foreground">Mis Facturas</h1>
-        <p className="text-sm text-muted-foreground mt-1">Cargá facturas y corregí los campos extraídos por OCR</p>
-        <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-xs">
-          <Clock className="h-3.5 w-3.5" />
-          Módulo en desarrollo — Datos de ejemplo
-        </div>
-      </div>
-
-      {/* Upload area */}
-      <div className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors">
-        <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-        <p className="text-sm font-semibold text-foreground">Subir factura</p>
-        <p className="text-xs text-muted-foreground mt-1">PDF o imagen · El sistema extrae los campos automáticamente con OCR</p>
-        <button className="mt-4 px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
-          Seleccionar archivo
-        </button>
-      </div>
-
-      {/* Facturas list */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">Facturas cargadas</h2>
-          <p className="text-xs text-muted-foreground">{MOCK_FACTURAS.length} facturas</p>
-        </div>
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[400px]">
-          <thead>
-            <tr className="border-b border-border bg-muted/30">
-              <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Factura</th>
-              <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Estado OCR</th>
-              <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Fecha</th>
-              <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Monto</th>
-              <th className="px-4 py-2.5" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {MOCK_FACTURAS.map((f) => (
-              <tr key={f.id} className="hover:bg-muted/50">
-                <td className="px-4 py-2.5 font-medium text-foreground flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                  {f.preview}
-                </td>
-                <td className="px-4 py-2.5"><StatusBadge status={f.status} /></td>
-                <td className="px-4 py-2.5 text-muted-foreground text-xs">{f.date}</td>
-                <td className="px-4 py-2.5 text-muted-foreground text-xs">{f.fields.monto || '—'}</td>
-                <td className="px-4 py-2.5">
-                  <button
-                    onClick={() => setSelectedFactura(f)}
-                    className="px-2 py-1 text-xs rounded bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1"
-                  >
-                    {f.status === 'CON_ERRORES' ? <><Edit2 className="h-3 w-3" /> Corregir</> : 'Ver detalle'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
-      </div>
-
-      <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-900/20 dark:border-blue-800">
-        <p className="text-xs text-blue-700 dark:text-blue-400 font-medium mb-1">Nota sobre corrección</p>
-        <p className="text-xs text-blue-600 dark:text-blue-400">
-          Podés corregir campos mal extraídos en facturas con estado "Con errores". La aprobación final siempre la realiza el equipo ADMIN.
-        </p>
-      </div>
-
-      {selectedFactura && (
-        <DetailPanel factura={selectedFactura} onClose={() => setSelectedFactura(null)} />
-      )}
-    </div>
-  );
+function delay(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }

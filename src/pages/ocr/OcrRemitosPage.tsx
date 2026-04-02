@@ -1,155 +1,506 @@
 /**
- * Terminal de campo — OPERADOR_CAMPO
- * Captura de remitos con webcam + cola offline
- * Maquetado — Pendiente de integración con backend OCR
+ * OcrRemitosPage — Terminal de campo (OPERADOR_CAMPO)
+ *
+ * Flujo completo:
+ *  1. Captura con webcam (MediaDevices.getUserMedia) o selección de archivo
+ *  2. Preview + confirmación antes de subir
+ *  3. Upload: requestUploadUrl → PUT a S3 → confirmUpload → OCR asíncrono
+ *  4. Polling de estado hasta que el OCR termine
+ *  5. Cola offline: si falla la conexión, guarda en localStorage para reintentar
+ *
+ * Credenciales:
+ *  - Sin S3 configurado → el backend devuelve error → se muestra "Servicio no disponible"
+ *  - Sin Vision → el OCR termina con estado CON_ERRORES (mensaje claro en errores)
  */
 
-import { useState } from 'react';
-import { Camera, Upload, Wifi, WifiOff, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { Camera, Upload, Wifi, WifiOff, CheckCircle, Clock, AlertTriangle, X, RefreshCw, Trash2 } from 'lucide-react';
+import * as ocrApi from '@/api/ocr';
+import { DocumentStatus, DocumentType } from '@/types/ocr.types';
+import { StatusBadge } from './components/StatusBadge';
+import { useAppDispatch, useAppSelector } from '@/store';
+import { fetchMyFacturas } from '@/store/ocr/documentsSlice';
 
-const MOCK_QUEUE = [
-  { id: '1', status: 'synced', preview: 'Remito #1234', date: '25/03/2026 14:30' },
-  { id: '2', status: 'pending', preview: 'Remito capturado (sin sincronizar)', date: '25/03/2026 15:10' },
-  { id: '3', status: 'error', preview: 'Remito con errores OCR', date: '24/03/2026 09:00' },
-];
+// ── Tipos locales ─────────────────────────────────────────────────────────────
 
-const MOCK_HISTORY = [
-  { id: '4', preview: 'Remito #1231', status: 'APROBADO', date: '23/03/2026' },
-  { id: '5', preview: 'Remito #1230', status: 'VALIDO', date: '22/03/2026' },
-  { id: '6', preview: 'Remito #1229', status: 'REVISION_PENDIENTE', date: '21/03/2026' },
-];
+type UploadStep = 'idle' | 'capture' | 'preview' | 'uploading' | 'polling' | 'done' | 'error';
+
+interface QueueItem {
+  id:         string;
+  preview:    string;  // object URL local
+  status:     'pending' | 'synced' | 'error';
+  documentId?: string;
+  createdAt:  string;
+  errorMsg?:  string;
+}
+
+const POLL_INTERVAL_MS = 2500;
+const POLL_MAX_RETRIES = 24; // 24 × 2.5s = 1 minuto máximo
+
+// ── Componente ────────────────────────────────────────────────────────────────
 
 export function OcrRemitosPage() {
-  const [isOnline] = useState(true);
-  const [showCapture, setShowCapture] = useState(false);
+  const dispatch     = useAppDispatch();
+  const { myFacturas } = useAppSelector((s) => s.ocrDocuments);
+
+  const [isOnline, setIsOnline]       = useState(navigator.onLine);
+  const [step, setStep]               = useState<UploadStep>('idle');
+  const [uploadPct, setUploadPct]     = useState(0);
+  const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
+  const [previewUrl, setPreviewUrl]   = useState<string | null>(null);
+  const [pollStatus, setPollStatus]   = useState<DocumentStatus | null>(null);
+  const [pollErrors, setPollErrors]   = useState<string[] | null>(null);
+  const [queue, setQueue]             = useState<QueueItem[]>(() => loadQueue());
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const videoRef    = useRef<HTMLVideoElement>(null);
+  const streamRef   = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Conectividad
+  useEffect(() => {
+    const on  = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener('online',  on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+
+  // Cargar historial de remitos propios
+  useEffect(() => {
+    dispatch(fetchMyFacturas({ limit: 5 }));
+  }, [dispatch]);
+
+  // ── Webcam ──────────────────────────────────────────────────────────────────
+
+  const startCamera = useCallback(async () => {
+    setCameraError(null);
+    setStep('capture');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch (err) {
+      const msg = (err as Error).name === 'NotAllowedError'
+        ? 'Permiso de cámara denegado. Habilitarlo en la configuración del navegador.'
+        : `No se pudo acceder a la cámara: ${(err as Error).message}`;
+      setCameraError(msg);
+      setStep('idle');
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  const captureFrame = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d')?.drawImage(video, 0, 0);
+
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      stopCamera();
+      setCapturedBlob(blob);
+      setPreviewUrl(URL.createObjectURL(blob));
+      setStep('preview');
+    }, 'image/jpeg', 0.92);
+  }, [stopCamera]);
+
+  const cancelCapture = useCallback(() => {
+    stopCamera();
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setCapturedBlob(null);
+    setPreviewUrl(null);
+    setStep('idle');
+  }, [stopCamera, previewUrl]);
+
+  // ── Seleccionar archivo ─────────────────────────────────────────────────────
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCapturedBlob(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setStep('preview');
+    e.target.value = '';
+  };
+
+  // ── Upload pipeline ─────────────────────────────────────────────────────────
+
+  const uploadDocument = useCallback(async () => {
+    if (!capturedBlob) return;
+
+    const contentType = (capturedBlob.type || 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
+
+    setStep('uploading');
+    setUploadPct(0);
+
+    let documentId: string | undefined;
+
+    try {
+      // Paso 1: solicitar presigned URL
+      const { uploadUrl, documentId: docId } = await ocrApi.requestUploadUrl(
+        DocumentType.REMITO,
+        contentType,
+      );
+      documentId = docId;
+
+      // Paso 2: subir a S3 con progreso
+      await ocrApi.uploadToS3(uploadUrl, capturedBlob, contentType, setUploadPct);
+
+      // Paso 3: confirmar al backend → dispara OCR
+      await ocrApi.confirmUpload(documentId);
+
+      // Agregar a cola local como "synced"
+      const newItem: QueueItem = {
+        id:         crypto.randomUUID(),
+        preview:    previewUrl ?? 'Remito capturado',
+        status:     'synced',
+        documentId,
+        createdAt:  new Date().toISOString(),
+      };
+      addToQueue(newItem);
+
+      // Paso 4: polling hasta que el OCR termine
+      setStep('polling');
+      setPollStatus(DocumentStatus.PROCESANDO);
+      await pollDocumentStatus(documentId);
+
+    } catch (err) {
+      const msg = (err as Error).message;
+
+      // Si el error es de S3 (servicio no configurado), mostrarlo claramente
+      const isStorageError = msg.includes('S3') || msg.includes('almacenamiento') || msg.includes('AWS');
+
+      toast.error(
+        isStorageError
+          ? 'Servicio de almacenamiento no disponible. Contactar al administrador.'
+          : `Error al subir: ${msg}`,
+      );
+
+      // Si el archivo llegó al backend pero falló S3, guardarlo en cola offline
+      if (!isStorageError) {
+        const offlineItem: QueueItem = {
+          id:       crypto.randomUUID(),
+          preview:  previewUrl ?? 'Remito pendiente',
+          status:   'error',
+          documentId,
+          createdAt: new Date().toISOString(),
+          errorMsg:  msg,
+        };
+        addToQueue(offlineItem);
+      }
+
+      setStep('error');
+    }
+  }, [capturedBlob, previewUrl]);
+
+  const pollDocumentStatus = async (docId: string) => {
+    for (let i = 0; i < POLL_MAX_RETRIES; i++) {
+      await delay(POLL_INTERVAL_MS);
+      try {
+        const { status, validationErrors } = await ocrApi.getDocumentStatus(docId);
+        setPollStatus(status);
+
+        if (status !== DocumentStatus.PROCESANDO && status !== DocumentStatus.PENDIENTE) {
+          setPollErrors(validationErrors);
+          setStep('done');
+
+          if (status === DocumentStatus.VALIDO) {
+            toast.success('Remito procesado correctamente');
+          } else if (status === DocumentStatus.CON_ERRORES) {
+            const hasConfigError = validationErrors?.some((e) =>
+              e.toLowerCase().includes('error interno') || e.toLowerCase().includes('procesamiento'),
+            );
+            toast.warning(
+              hasConfigError
+                ? 'OCR no disponible (pendiente de configuración). El remito fue guardado para revisión manual.'
+                : `Remito con errores — quedarán para revisión del equipo ADMIN.`,
+            );
+          }
+          return;
+        }
+      } catch {
+        // Error de red al hacer polling — continuar intentando
+      }
+    }
+    // Timeout
+    setPollStatus(DocumentStatus.CON_ERRORES);
+    setPollErrors(['Tiempo de procesamiento excedido. El documento quedó en cola de revisión.']);
+    setStep('done');
+  };
+
+  const resetFlow = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setCapturedBlob(null);
+    setPreviewUrl(null);
+    setPollStatus(null);
+    setPollErrors(null);
+    setUploadPct(0);
+    setStep('idle');
+  };
+
+  // ── Cola local (localStorage) ───────────────────────────────────────────────
+
+  function addToQueue(item: QueueItem) {
+    setQueue((prev) => {
+      const updated = [item, ...prev].slice(0, 20);
+      localStorage.setItem('ocr-remitos-queue', JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  function removeFromQueue(id: string) {
+    setQueue((prev) => {
+      const updated = prev.filter((i) => i.id !== id);
+      localStorage.setItem('ocr-remitos-queue', JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-2xl mx-auto">
-      {/* Header + connectivity */}
+      {/* Header + conectividad */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-foreground">Terminal de Remitos</h1>
           <p className="text-sm text-muted-foreground">Captura y sincronización de remitos</p>
         </div>
-        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isOnline ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
+          isOnline
+            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+        }`}>
           {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
           {isOnline ? 'Online' : 'Offline — guardando localmente'}
         </div>
       </div>
 
-      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-xs">
-        <Clock className="h-3.5 w-3.5" />
-        Módulo en desarrollo — Webcam y sincronización no disponibles aún
-      </div>
-
-      {/* Capture area */}
-      {!showCapture ? (
-        <div
-          onClick={() => setShowCapture(true)}
-          className="border-2 border-dashed border-border rounded-xl p-12 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors"
-        >
-          <Camera className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-          <p className="text-lg font-semibold text-foreground">Capturar remito</p>
-          <p className="text-sm text-muted-foreground mt-1">Toca para activar la webcam y fotografiar el remito</p>
+      {cameraError && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800 text-sm text-red-700 dark:text-red-400 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          {cameraError}
         </div>
-      ) : (
+      )}
+
+      {/* ── Estado: idle ─────────────────────────────────────────── */}
+      {step === 'idle' && (
+        <>
+          <div
+            onClick={startCamera}
+            className="border-2 border-dashed border-border rounded-xl p-12 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors"
+          >
+            <Camera className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
+            <p className="text-lg font-semibold text-foreground">Capturar remito</p>
+            <p className="text-sm text-muted-foreground mt-1">Toca para activar la cámara</p>
+          </div>
+
+          <div className="border border-dashed border-border rounded-lg p-4 text-center">
+            <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">O seleccioná una imagen desde el dispositivo</p>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-2 px-4 py-1.5 text-sm rounded-md bg-muted text-muted-foreground hover:bg-accent"
+            >
+              Seleccionar archivo
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+          </div>
+        </>
+      )}
+
+      {/* ── Estado: capture (webcam activa) ──────────────────────── */}
+      {step === 'capture' && (
         <div className="border border-border rounded-xl overflow-hidden">
-          <div className="bg-black aspect-video flex items-center justify-center">
-            <div className="text-center text-white">
-              <Camera className="h-12 w-12 mx-auto mb-3 opacity-60" />
-              <p className="text-sm opacity-60">Webcam no disponible en modo maquetado</p>
-              <p className="text-xs opacity-40 mt-1">Se activará con MediaDevices.getUserMedia()</p>
-            </div>
+          <div className="bg-black aspect-video flex items-center justify-center relative">
+            <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
           </div>
           <div className="p-4 flex gap-2 bg-card">
             <button
-              onClick={() => setShowCapture(false)}
-              className="flex-1 py-2 text-sm rounded-md border border-border text-muted-foreground hover:bg-accent"
+              onClick={cancelCapture}
+              className="flex-1 py-2 text-sm rounded-md border border-border text-muted-foreground hover:bg-accent flex items-center justify-center gap-2"
             >
-              Cancelar
+              <X className="h-4 w-4" /> Cancelar
             </button>
-            <button className="flex-1 py-2 text-sm rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 flex items-center justify-center gap-2">
-              <Camera className="h-4 w-4" />
-              Capturar
+            <button
+              onClick={captureFrame}
+              className="flex-1 py-2 text-sm rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 flex items-center justify-center gap-2"
+            >
+              <Camera className="h-4 w-4" /> Capturar
             </button>
           </div>
         </div>
       )}
 
-      {/* Upload alternative */}
-      <div className="border border-dashed border-border rounded-lg p-4 text-center">
-        <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-        <p className="text-sm text-muted-foreground">O subí una imagen desde el dispositivo</p>
-        <button className="mt-2 px-4 py-1.5 text-sm rounded-md bg-muted text-muted-foreground hover:bg-accent">
-          Seleccionar archivo
-        </button>
-      </div>
-
-      {/* Offline queue */}
-      <div>
-        <h2 className="text-sm font-semibold text-foreground mb-3">Cola de sincronización</h2>
-        <div className="space-y-2">
-          {MOCK_QUEUE.map((item) => (
-            <div key={item.id} className="flex items-center gap-3 p-3 bg-card border border-border rounded-lg">
-              <div className={`p-1.5 rounded-full ${
-                item.status === 'synced' ? 'bg-green-100 dark:bg-green-900/30' :
-                item.status === 'pending' ? 'bg-yellow-100 dark:bg-yellow-900/30' :
-                'bg-red-100 dark:bg-red-900/30'
-              }`}>
-                {item.status === 'synced' ? <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" /> :
-                 item.status === 'pending' ? <Clock className="h-4 w-4 text-yellow-600 dark:text-yellow-400" /> :
-                 <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-foreground truncate">{item.preview}</p>
-                <p className="text-xs text-muted-foreground">{item.date}</p>
-              </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                item.status === 'synced' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                item.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-              }`}>
-                {item.status === 'synced' ? 'Sincronizado' : item.status === 'pending' ? 'Pendiente' : 'Error OCR'}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* History */}
-      <div>
-        <h2 className="text-sm font-semibold text-foreground mb-3">Mis remitos recientes</h2>
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[320px]">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Descripción</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Estado</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Fecha</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {MOCK_HISTORY.map((item) => (
-                <tr key={item.id} className="hover:bg-muted/50">
-                  <td className="px-4 py-2.5 text-foreground">{item.preview}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
-                      item.status === 'APROBADO' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                      item.status === 'VALIDO' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                      'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                    }`}>
-                      {item.status === 'APROBADO' ? 'Aprobado' : item.status === 'VALIDO' ? 'Válido' : 'En revisión'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground text-xs">{item.date}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* ── Estado: preview ───────────────────────────────────────── */}
+      {step === 'preview' && previewUrl && (
+        <div className="border border-border rounded-xl overflow-hidden">
+          <img src={previewUrl} alt="Preview remito" className="w-full object-contain max-h-64 bg-black" />
+          <div className="p-4 flex gap-2 bg-card">
+            <button
+              onClick={cancelCapture}
+              className="flex-1 py-2 text-sm rounded-md border border-border text-muted-foreground hover:bg-accent"
+            >
+              Descartar
+            </button>
+            <button
+              onClick={uploadDocument}
+              className="flex-1 py-2 text-sm rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 flex items-center justify-center gap-2"
+            >
+              <Upload className="h-4 w-4" /> Enviar
+            </button>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ── Estado: uploading ─────────────────────────────────────── */}
+      {step === 'uploading' && (
+        <div className="border border-border rounded-xl p-6 text-center space-y-4">
+          <Upload className="h-10 w-10 mx-auto text-primary animate-bounce" />
+          <p className="text-sm font-medium text-foreground">Subiendo imagen…</p>
+          <div className="w-full bg-muted rounded-full h-2">
+            <div
+              className="bg-primary h-2 rounded-full transition-all"
+              style={{ width: `${uploadPct}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{uploadPct}%</p>
+        </div>
+      )}
+
+      {/* ── Estado: polling (OCR en progreso) ────────────────────── */}
+      {step === 'polling' && (
+        <div className="border border-border rounded-xl p-6 text-center space-y-3">
+          <RefreshCw className="h-10 w-10 mx-auto text-blue-500 animate-spin" />
+          <p className="text-sm font-medium text-foreground">Procesando con OCR…</p>
+          <p className="text-xs text-muted-foreground">
+            El sistema está extrayendo los datos del remito. Puede tardar hasta 30 segundos.
+          </p>
+          {pollStatus && <StatusBadge status={pollStatus} />}
+        </div>
+      )}
+
+      {/* ── Estado: done ──────────────────────────────────────────── */}
+      {step === 'done' && pollStatus && (
+        <div className="border border-border rounded-xl p-6 space-y-4">
+          <div className="text-center">
+            {pollStatus === DocumentStatus.VALIDO || pollStatus === DocumentStatus.REVISADO ? (
+              <CheckCircle className="h-12 w-12 mx-auto text-green-500 mb-2" />
+            ) : (
+              <AlertTriangle className="h-12 w-12 mx-auto text-orange-500 mb-2" />
+            )}
+            <StatusBadge status={pollStatus} />
+          </div>
+
+          {pollErrors && pollErrors.length > 0 && (
+            <div className="p-3 rounded-lg bg-orange-50 border border-orange-200 dark:bg-orange-900/20 dark:border-orange-800 text-xs text-orange-700 dark:text-orange-400 space-y-1">
+              <p className="font-medium">Observaciones:</p>
+              {pollErrors.map((e, i) => <p key={i}>• {e}</p>)}
+            </div>
+          )}
+
+          <button
+            onClick={resetFlow}
+            className="w-full py-2 text-sm rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90"
+          >
+            Subir otro remito
+          </button>
+        </div>
+      )}
+
+      {/* ── Estado: error ─────────────────────────────────────────── */}
+      {step === 'error' && (
+        <div className="border border-red-200 rounded-xl p-6 text-center space-y-3 bg-red-50 dark:bg-red-900/20 dark:border-red-800">
+          <AlertTriangle className="h-10 w-10 mx-auto text-red-500" />
+          <p className="text-sm font-medium text-red-700 dark:text-red-400">No se pudo procesar el remito</p>
+          <button onClick={resetFlow} className="px-4 py-2 text-sm rounded-md border border-border hover:bg-accent">
+            Intentar de nuevo
+          </button>
+        </div>
+      )}
+
+      {/* ── Cola de sincronización ──────────────────────────────────── */}
+      {queue.length > 0 && (
+        <div>
+          <h2 className="text-sm font-semibold text-foreground mb-3">Cola reciente</h2>
+          <div className="space-y-2">
+            {queue.slice(0, 5).map((item) => (
+              <div key={item.id} className="flex items-center gap-3 p-3 bg-card border border-border rounded-lg">
+                <div className={`p-1.5 rounded-full ${
+                  item.status === 'synced' ? 'bg-green-100 dark:bg-green-900/30' :
+                  item.status === 'pending' ? 'bg-yellow-100 dark:bg-yellow-900/30' :
+                  'bg-red-100 dark:bg-red-900/30'
+                }`}>
+                  {item.status === 'synced'
+                    ? <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                    : item.status === 'pending'
+                    ? <Clock className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                    : <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-foreground truncate">
+                    {item.documentId ? `ID: ${item.documentId.slice(0, 8)}…` : 'Pendiente de envío'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(item.createdAt).toLocaleString('es-AR')}
+                  </p>
+                  {item.errorMsg && (
+                    <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
+                  )}
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  item.status === 'synced'  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                  item.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                }`}>
+                  {item.status === 'synced' ? 'Enviado' : item.status === 'pending' ? 'Pendiente' : 'Error'}
+                </span>
+                <button
+                  onClick={() => removeFromQueue(item.id)}
+                  title="Quitar de la cola"
+                  className="p-1 rounded text-muted-foreground hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function delay(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function loadQueue(): QueueItem[] {
+  try {
+    return JSON.parse(localStorage.getItem('ocr-remitos-queue') ?? '[]') as QueueItem[];
+  } catch {
+    return [];
+  }
 }

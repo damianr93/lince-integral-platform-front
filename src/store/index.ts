@@ -7,6 +7,7 @@ import satisfactionReducer from './crm/satisfactionSlice';
 import usersReducer from './admin/usersSlice';
 import areasReducer from './admin/areasSlice';
 import marketingReducer from './marketing/campaignsSlice';
+import ocrDocumentsReducer from './ocr/documentsSlice';
 
 export const store = configureStore({
   reducer: {
@@ -17,6 +18,7 @@ export const store = configureStore({
     users: usersReducer,
     areas: areasReducer,
     marketing: marketingReducer,
+    ocrDocuments: ocrDocumentsReducer,
   },
 });
 

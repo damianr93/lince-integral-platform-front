@@ -78,6 +78,9 @@ const OcrRemitosPage = lazy(() =>
 const OcrFacturasPage = lazy(() =>
   import('@/pages/ocr/OcrFacturasPage').then((m) => ({ default: m.OcrFacturasPage })),
 );
+const OcrConfigPage = lazy(() =>
+  import('@/pages/ocr/OcrConfigPage').then((m) => ({ default: m.OcrConfigPage })),
+);
 
 function PageLoader() {
   return (
@@ -298,6 +301,14 @@ const router = createBrowserRouter([
                     element: (
                       <Suspense fallback={<PageLoader />}>
                         <OcrFacturasPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'configuracion',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <OcrConfigPage />
                       </Suspense>
                     ),
                   },

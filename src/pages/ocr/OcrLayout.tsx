@@ -2,15 +2,19 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { Camera, FileText, LayoutDashboard, Settings } from 'lucide-react';
 import { useAppSelector } from '@/store';
 import { GlobalRole } from '@/types';
+import { OcrRole } from '@/types/ocr.types';
 
 export function OcrLayout() {
   const user = useAppSelector((s) => s.auth.user);
+
   const isAdmin = user?.globalRole === GlobalRole.ADMIN || user?.globalRole === GlobalRole.SUPERADMIN;
-  const isAdminOrAdministrativo = isAdmin || user?.modules?.ocr?.role === 'ADMINISTRATIVO';
+  const isSuperAdmin = user?.globalRole === GlobalRole.SUPERADMIN;
+  const ocrRole = user?.modules?.['ocr']?.role as OcrRole | undefined;
+  const isAdminOrAdministrativo = isAdmin || ocrRole === OcrRole.ADMINISTRATIVO;
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     [
-      'flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors',
+      'flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors whitespace-nowrap',
       isActive
         ? 'bg-primary text-primary-foreground'
         : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
@@ -35,7 +39,7 @@ export function OcrLayout() {
             Facturas
           </NavLink>
         )}
-        {isAdmin && (
+        {isSuperAdmin && (
           <NavLink to="/ocr/configuracion" className={navClass}>
             <Settings className="h-4 w-4" />
             Configuración
