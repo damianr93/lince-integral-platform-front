@@ -72,3 +72,9 @@ export const reconfigureScheduledWaves = (
 
 export const getCampaignLogs = (campaignId: string) =>
   api.get<CampaignLog[]>(`/marketing/campaigns/${campaignId}/logs`);
+
+export const retryRecipient = (campaignId: string, recipientId: string) =>
+  api.post<void>(`/marketing/campaigns/${campaignId}/recipients/${recipientId}/retry`, {});
+
+export const updateRecipientPhone = (campaignId: string, recipientId: string, phone: string) =>
+  api.patch<void>(`/marketing/campaigns/${campaignId}/recipients/${recipientId}/phone`, { phone });

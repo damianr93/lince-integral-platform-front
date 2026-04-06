@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, RefreshCw, Plus, Trash2, Pencil, Check, X } from 'lucide-react';
+import { ArrowLeft, Play, RefreshCw, Plus, Trash2, Pencil, Check, X, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
@@ -9,7 +9,7 @@ import {
   executeCampaign,
   clearCurrentCampaign,
 } from '@/store/marketing/campaignsSlice';
-import { getCampaignPreview, configureWaves, getCampaignLogs, rescheduleWave, reconfigureScheduledWaves } from '@/api/marketing';
+import { getCampaignPreview, configureWaves, getCampaignLogs, rescheduleWave, reconfigureScheduledWaves, retryRecipient, updateRecipientPhone } from '@/api/marketing';
 import { Button } from '@/components/ui/Button';
 import { ExecuteConfirmModal } from './ExecuteConfirmModal';
 import type { CampaignRecipient, CampaignPreviewItem, CampaignLog, CampaignWave } from '@/types/marketing.types';
@@ -142,6 +142,14 @@ export function CampaignDetailPage() {
   const [reconfiguringWaves, setReconfiguringWaves] = useState(false);
   const [reconfWaveDrafts, setReconfWaveDrafts] = useState<WaveDraft[]>([]);
   const [savingReconf, setSavingReconf] = useState(false);
+
+  // Filtro de destinatarios (post-ejecución)
+  const [filterRecStatus, setFilterRecStatus] = useState<'all' | 'FAILED' | 'SENT' | 'PENDING'>('all');
+
+  // Retry / editar teléfono
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [editingPhoneId, setEditingPhoneId] = useState<string | null>(null);
+  const [editingPhoneValue, setEditingPhoneValue] = useState('');
 
   useEffect(() => {
     if (!id) return;
@@ -312,6 +320,35 @@ export function CampaignDetailPage() {
     }
   }
 
+  async function handleRetry(recipientId: string) {
+    if (!id) return;
+    setRetryingId(recipientId);
+    try {
+      await retryRecipient(id, recipientId);
+      toast.success('Reintento programado');
+      void dispatch(fetchRecipients(id));
+      void dispatch(fetchCampaign(id));
+    } catch {
+      toast.error('Error al programar el reintento');
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
+  async function handleSavePhone(recipientId: string) {
+    if (!id) return;
+    try {
+      await updateRecipientPhone(id, recipientId, editingPhoneValue.trim());
+      toast.success('Teléfono actualizado y reintento programado');
+      setEditingPhoneId(null);
+      setEditingPhoneValue('');
+      void dispatch(fetchRecipients(id));
+      void dispatch(fetchCampaign(id));
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Error al actualizar el teléfono');
+    }
+  }
+
   function addWave() {
     if (waveDrafts.length >= 3) return;
     setWaveDrafts((prev) => [...prev, { scheduledAt: '', recipientCount: 0 }]);
@@ -363,6 +400,10 @@ export function CampaignDetailPage() {
     acc[r.status].push(r);
     return acc;
   }, {});
+
+  const filteredRecipients = filterRecStatus === 'all'
+    ? recipients
+    : recipients.filter((r) => r.status === filterRecStatus);
 
   const willSendCount = preview.filter((p) => p.willSend).length;
   const willSkipCount = preview.length - willSendCount;
@@ -886,10 +927,21 @@ export function CampaignDetailPage() {
               <span className="ml-2 text-muted-foreground font-normal">({recipients.length})</span>
             </h3>
             <div className="flex flex-wrap gap-2">
+              {/* Badges de totales — clicables para filtrar */}
+              <button
+                onClick={() => setFilterRecStatus('all')}
+                className={`px-2 py-0.5 rounded-full text-xs font-medium transition-opacity ${filterRecStatus === 'all' ? 'ring-2 ring-primary' : 'opacity-70 hover:opacity-100'} bg-muted text-muted-foreground`}
+              >
+                Todos: {recipients.length}
+              </button>
               {Object.entries(byStatus).map(([status, list]) => (
-                <span key={status} className={`px-2 py-0.5 rounded-full text-xs font-medium ${REC_STATUS_CLASSES[status] ?? ''}`}>
+                <button
+                  key={status}
+                  onClick={() => setFilterRecStatus(filterRecStatus === status ? 'all' : status as any)}
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium transition-opacity ${filterRecStatus === status ? 'ring-2 ring-primary' : 'opacity-70 hover:opacity-100'} ${REC_STATUS_CLASSES[status] ?? ''}`}
+                >
                   {REC_STATUS_LABELS[status] ?? status}: {list.length}
-                </span>
+                </button>
               ))}
             </div>
           </div>
@@ -902,7 +954,7 @@ export function CampaignDetailPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[540px]">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">
                     <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Cliente</th>
@@ -912,13 +964,43 @@ export function CampaignDetailPage() {
                     <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Estado</th>
                     <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Detalle</th>
                     <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden lg:table-cell">Enviado</th>
+                    <th className="px-4 py-2.5" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {recipients.map((r) => (
+                  {filteredRecipients.map((r) => (
                     <tr key={r.id} className="hover:bg-muted/50">
                       <td className="px-4 py-2.5 text-foreground">{r.customerName || '—'}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{r.customerPhone}</td>
+                      {/* Teléfono — editable inline cuando está en edición */}
+                      <td className="px-4 py-2.5 text-muted-foreground">
+                        {editingPhoneId === r.id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              className="border border-border rounded px-1.5 py-0.5 text-xs w-36 bg-background text-foreground"
+                              value={editingPhoneValue}
+                              onChange={(e) => setEditingPhoneValue(e.target.value)}
+                              placeholder="+5491122334455"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => void handleSavePhone(r.id)}
+                              className="text-green-600 hover:text-green-700 p-0.5"
+                              title="Guardar"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => { setEditingPhoneId(null); setEditingPhoneValue(''); }}
+                              className="text-muted-foreground hover:text-foreground p-0.5"
+                              title="Cancelar"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          r.customerPhone
+                        )}
+                      </td>
                       <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">{r.siguiendo}</td>
                       <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">
                         {r.waveNumber != null ? `#${r.waveNumber}` : '—'}
@@ -941,6 +1023,28 @@ export function CampaignDetailPage() {
                       </td>
                       <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap hidden lg:table-cell">
                         {r.sentAt ? formatDate(r.sentAt) : '—'}
+                      </td>
+                      {/* Acciones — solo para FAILED */}
+                      <td className="px-4 py-2.5">
+                        {r.status === 'FAILED' && editingPhoneId !== r.id && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => void handleRetry(r.id)}
+                              disabled={retryingId === r.id}
+                              className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50"
+                              title="Reintentar"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => { setEditingPhoneId(r.id); setEditingPhoneValue(r.customerPhone); }}
+                              className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                              title="Editar teléfono y reintentar"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
