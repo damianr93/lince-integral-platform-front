@@ -43,8 +43,9 @@ export function RunDetailPage() {
     try {
       const data = await conciliacionesApi.getRun(id);
       setDetail(data);
-    } catch {
-      toast.error('No se pudo cargar la conciliación');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido';
+      toast.error(`No se pudo cargar la conciliación: ${msg}`);
     } finally {
       setIsLoading(false);
     }
@@ -144,10 +145,24 @@ export function RunDetailPage() {
     return m;
   }, [detail?.pendingItems]);
 
-  if (isLoading || !detail) {
+  if (isLoading) {
     return (
       <div className="flex h-96 items-center justify-center">
         <p className="text-muted-foreground">Cargando...</p>
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <div className="flex h-96 flex-col items-center justify-center gap-3">
+        <p className="text-muted-foreground">No se pudo cargar la conciliación.</p>
+        <button
+          onClick={() => { setIsLoading(true); void fetchDetail(); }}
+          className="text-sm text-primary underline hover:no-underline"
+        >
+          Reintentar
+        </button>
       </div>
     );
   }

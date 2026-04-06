@@ -21,9 +21,27 @@ type FileState = {
   error: string | null;
 };
 
-const initFileState = (): FileState => ({
-  file: null, sheets: [], rows: [], columns: [], selectedSheet: '', headerRow: 1, isLoading: false, error: null,
+const initFileState = (headerRow = 1): FileState => ({
+  file: null, sheets: [], rows: [], columns: [], selectedSheet: '', headerRow, isLoading: false, error: null,
 });
+
+// Mapeo automático para el archivo de Sistema — busca los nombres de columna habituales
+// (insensible a mayúsculas/acentos) y devuelve un SystemMapping parcial.
+function autoMapSystem(cols: string[]): Partial<ReturnType<typeof initSystemMapping>> {
+  const find = (...candidates: string[]) =>
+    cols.find((c) => candidates.some((k) => c.toLowerCase().includes(k.toLowerCase()))) ?? '';
+
+  const issueDateCol = find('emisi', 'fecha emis', 'f. emis', 'fecha_emis');
+  const dueDateCol   = find('vencim', 'fecha venc', 'f. venc', 'fecha_venc');
+  const descriptionCol = find('comentario', 'descripci', 'concepto', 'detalle', 'glosa');
+  const debeCol  = find('debe');
+  const haberCol = find('haber');
+
+  const amountMode: 'single' | 'debe-haber' =
+    debeCol && haberCol ? 'debe-haber' : 'single';
+
+  return { issueDateCol, dueDateCol, descriptionCol, debeCol, haberCol, amountMode };
+}
 
 const initExtractMapping = (): ExtractMapping => ({ amountMode: 'single', dateCol: '', conceptCol: '', amountCol: '', debeCol: '', haberCol: '' });
 const initSystemMapping = (): SystemMapping => ({ amountMode: 'single', issueDateCol: '', dueDateCol: '', descriptionCol: '', amountCol: '', debeCol: '', haberCol: '' });
@@ -33,7 +51,7 @@ const BANK_OPTIONS = ['Banco Nación', 'Banco Galicia', 'Banco Santander', 'Banc
 export function NewReconciliationPage() {
   const navigate = useNavigate();
   const [extract, setExtract] = useState<FileState>(initFileState());
-  const [system, setSystem] = useState<FileState>(initFileState());
+  const [system, setSystem] = useState<FileState>(initFileState(6));
   const [extractMapping, setExtractMapping] = useState<ExtractMapping>(initExtractMapping());
   const [systemMapping, setSystemMapping] = useState<SystemMapping>(initSystemMapping());
   const [bankName, setBankName] = useState('');
@@ -69,8 +87,16 @@ export function NewReconciliationPage() {
   const handleSystemFile = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setSystem((s) => ({ ...initFileState(), file }));
-    void parseFile({ ...initFileState(), file }, setSystem, file);
+    setSystem({ ...initFileState(6), file, isLoading: true, error: null });
+    void conciliacionesApi.parseFile(file, undefined, 6)
+      .then((result) => {
+        const cols = result.rows.length ? Object.keys(result.rows[0] as object) : [];
+        setSystem((s) => ({ ...s, sheets: result.sheets, rows: result.rows, columns: cols, selectedSheet: result.sheets[0] ?? '', isLoading: false }));
+        setSystemMapping((m) => ({ ...m, ...autoMapSystem(cols) }));
+      })
+      .catch((err: unknown) => {
+        setSystem((s) => ({ ...s, isLoading: false, error: err instanceof Error ? err.message : 'Error al procesar archivo' }));
+      });
   };
 
   const conceptOptions = (() => {
