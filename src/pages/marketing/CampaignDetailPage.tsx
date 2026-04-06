@@ -87,6 +87,26 @@ function formatDate(iso?: string) {
   });
 }
 
+const YCLOUD_CODE_LABELS: Record<string, string> = {
+  PARAM_INVALID: 'Caracteres inválidos',
+  BALANCE_INSUFFICIENT: 'Fondos insuficientes',
+};
+
+function friendlyError(raw?: string): string {
+  if (!raw) return '';
+  // Algunos mensajes viejos quedaron como JSON crudo; intentar parsearlos
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const inner = (parsed['error'] ?? parsed) as Record<string, unknown>;
+    const code = inner['code'] as string | undefined;
+    if (code && YCLOUD_CODE_LABELS[code]) return YCLOUD_CODE_LABELS[code];
+    if (inner['message']) return String(inner['message']);
+  } catch { /* no era JSON */ }
+  // Ya es un mensaje limpio
+  if (YCLOUD_CODE_LABELS[raw]) return YCLOUD_CODE_LABELS[raw];
+  return raw;
+}
+
 function toLocalDatetimeValue(iso?: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -801,12 +821,17 @@ export function CampaignDetailPage() {
                       )}
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${WAVE_STATUS_CLASSES[wave.status] ?? ''}`}>
-                        {WAVE_STATUS_LABELS[wave.status] ?? wave.status}
-                      </span>
+                      {(() => {
+                        const displayStatus = isCompleted && wave.status === 'RUNNING' ? 'COMPLETED' : wave.status;
+                        return (
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${WAVE_STATUS_CLASSES[displayStatus] ?? ''}`}>
+                            {WAVE_STATUS_LABELS[displayStatus] ?? displayStatus}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap hidden md:table-cell">
-                      {formatDate(wave.completedAt)}
+                      {formatDate(wave.completedAt) !== '—' ? formatDate(wave.completedAt) : (isCompleted && wave.status === 'RUNNING' ? formatDate(c.completedAt) : '—')}
                     </td>
                   </tr>
                 ))}
@@ -1013,8 +1038,8 @@ export function CampaignDetailPage() {
                       <td className="px-4 py-2.5 text-muted-foreground max-w-[200px] hidden md:table-cell">
                         {r.skipReason && <span className="text-xs">{r.skipReason}</span>}
                         {r.errorMessage && !r.skipReason && (
-                          <span className="text-xs text-destructive" title={r.errorMessage}>
-                            {r.errorMessage.length > 40 ? `${r.errorMessage.slice(0, 40)}…` : r.errorMessage}
+                          <span className="text-xs text-destructive" title={friendlyError(r.errorMessage)}>
+                            {friendlyError(r.errorMessage)}
                           </span>
                         )}
                         {r.yCloudMessageId && (
