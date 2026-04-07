@@ -8,6 +8,9 @@ import usersReducer from './admin/usersSlice';
 import areasReducer from './admin/areasSlice';
 import marketingReducer from './marketing/campaignsSlice';
 import ocrDocumentsReducer from './ocr/documentsSlice';
+import equiposReducer from './soporte-it/equiposSlice';
+import incidentesReducer from './soporte-it/incidentesSlice';
+import relevamientosReducer from './soporte-it/relevamientosSlice';
 
 export const store = configureStore({
   reducer: {
@@ -19,6 +22,9 @@ export const store = configureStore({
     areas: areasReducer,
     marketing: marketingReducer,
     ocrDocuments: ocrDocumentsReducer,
+    equipos: equiposReducer,
+    incidentes: incidentesReducer,
+    relevamientos: relevamientosReducer,
   },
 });
 

@@ -29,6 +29,7 @@ const MODULE_LABELS: Record<ModuleKey, string> = {
   [ModuleKey.CONCILIACIONES]: 'Conciliaciones',
   [ModuleKey.OCR]: 'OCR',
   [ModuleKey.MARKETING]: 'Marketing',
+  [ModuleKey.SOPORTE_IT]: 'Soporte IT',
 };
 
 const MODULE_ROLES = ['VIEWER', 'EDITOR', 'ADMIN'];

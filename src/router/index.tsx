@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { GlobalRole, ModuleKey } from '@/types';
+import { useAppSelector } from '@/store';
 import { PrivateRoute } from './PrivateRoute';
 import { RequireModule } from './RequireModule';
 import { RequireRole } from './RequireRole';
@@ -9,6 +10,34 @@ import { LoginPage } from '@/pages/LoginPage';
 
 const DashboardPage = lazy(() =>
   import('@/pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+);
+
+const SoporteItLayout = lazy(() =>
+  import('@/pages/soporte-it/SoporteItLayout').then((m) => ({ default: m.SoporteItLayout })),
+);
+const EquiposPage = lazy(() =>
+  import('@/pages/soporte-it/EquiposPage').then((m) => ({ default: m.EquiposPage })),
+);
+const EquipoDetailPage = lazy(() =>
+  import('@/pages/soporte-it/EquipoDetailPage').then((m) => ({ default: m.EquipoDetailPage })),
+);
+const IncidentesPage = lazy(() =>
+  import('@/pages/soporte-it/IncidentesPage').then((m) => ({ default: m.IncidentesPage })),
+);
+const IncidenteDetailPage = lazy(() =>
+  import('@/pages/soporte-it/IncidenteDetailPage').then((m) => ({ default: m.IncidenteDetailPage })),
+);
+const MisEquiposPage = lazy(() =>
+  import('@/pages/soporte-it/MisEquiposPage').then((m) => ({ default: m.MisEquiposPage })),
+);
+const MisIncidentesPage = lazy(() =>
+  import('@/pages/soporte-it/MisIncidentesPage').then((m) => ({ default: m.MisIncidentesPage })),
+);
+const ReportarIncidentePage = lazy(() =>
+  import('@/pages/soporte-it/ReportarIncidentePage').then((m) => ({ default: m.ReportarIncidentePage })),
+);
+const IncidenteUserDetailPage = lazy(() =>
+  import('@/pages/soporte-it/IncidenteUserDetailPage').then((m) => ({ default: m.IncidenteUserDetailPage })),
 );
 const ModulePlaceholder = lazy(() =>
   import('@/pages/ModulePlaceholder').then((m) => ({ default: m.ModulePlaceholder })),
@@ -87,6 +116,17 @@ function PageLoader() {
     <div className="flex items-center justify-center h-full min-h-[400px]">
       <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
     </div>
+  );
+}
+
+function SoporteItIndexRedirect() {
+  const user = useAppSelector((s) => s.auth.user);
+  if (!user) return <Navigate to="/login" replace />;
+  return (
+    <Navigate
+      to={user.globalRole === GlobalRole.SUPERADMIN ? 'equipos' : 'mis-equipos'}
+      replace
+    />
   );
 }
 
@@ -262,6 +302,96 @@ const router = createBrowserRouter([
                     element: (
                       <Suspense fallback={<PageLoader />}>
                         <MarketingSeguimientoPage />
+                      </Suspense>
+                    ),
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            path: 'soporte-it',
+            element: <RequireModule moduleKey={ModuleKey.SOPORTE_IT} />,
+            children: [
+              {
+                element: (
+                  <Suspense fallback={<PageLoader />}>
+                    <SoporteItLayout />
+                  </Suspense>
+                ),
+                children: [
+                  { index: true, element: <SoporteItIndexRedirect /> },
+                  // Vistas SUPERADMIN
+                  {
+                    path: 'equipos',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <EquiposPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'equipos/:id',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <EquipoDetailPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'incidentes',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <IncidentesPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'incidentes/:id',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <IncidenteDetailPage />
+                      </Suspense>
+                    ),
+                  },
+                  // Vistas usuario final
+                  {
+                    path: 'mis-equipos',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <MisEquiposPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'mis-equipos/:id',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <EquipoDetailPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'mis-incidentes',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <MisIncidentesPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'mis-incidentes/:id',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <IncidenteUserDetailPage />
+                      </Suspense>
+                    ),
+                  },
+                  {
+                    path: 'reportar',
+                    element: (
+                      <Suspense fallback={<PageLoader />}>
+                        <ReportarIncidentePage />
                       </Suspense>
                     ),
                   },

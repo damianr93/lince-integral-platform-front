@@ -19,6 +19,8 @@ export function AppLayout() {
   };
 
   if (!user) return null;
+  const isTag = user.area?.toUpperCase() === 'TAG';
+  if (isTag) return <Outlet />;
 
   return (
     <Layout user={user} onLogout={handleLogout}>

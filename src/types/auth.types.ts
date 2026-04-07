@@ -9,6 +9,7 @@ export enum ModuleKey {
   CONCILIACIONES = 'conciliaciones',
   OCR = 'ocr',
   MARKETING = 'marketing',
+  SOPORTE_IT = 'soporte-it',
 }
 
 export interface ModulePermission {
@@ -22,6 +23,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
+  area?: string | null;
   globalRole: GlobalRole;
   modules: UserModules;
   mustChangePassword: boolean;

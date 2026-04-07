@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { FileText, LayoutDashboard, Megaphone, ScanLine, Settings, Users } from 'lucide-react';
+import { FileText, LayoutDashboard, Megaphone, Monitor, ScanLine, Settings, Users } from 'lucide-react';
 import { GlobalRole, ModuleKey, type AuthUser } from '@/types';
 
 export type DashboardNavKey = 'dashboard' | 'admin';
@@ -44,6 +44,13 @@ export const APP_MODULE_NAV: readonly AppModuleNav[] = [
     requiresModule: ModuleKey.MARKETING,
   },
   {
+    key: ModuleKey.SOPORTE_IT,
+    label: 'Soporte IT',
+    path: '/soporte-it',
+    Icon: Monitor,
+    requiresModule: ModuleKey.SOPORTE_IT,
+  },
+  {
     key: 'admin',
     label: 'Admin',
     path: '/admin',
@@ -58,6 +65,8 @@ export function isNavItemVisible(entry: AppModuleNav, user: AuthUser): boolean {
   if (!entry.requiresModule) return true;
   // SUPERADMIN ve todos los módulos (igual que el backend siempre lo deja pasar)
   if (user.globalRole === GlobalRole.SUPERADMIN) return true;
+  // Soporte IT siempre visible para usuarios autenticados.
+  if (entry.requiresModule === ModuleKey.SOPORTE_IT) return true;
   return user.modules[entry.requiresModule]?.enabled === true;
 }
 
