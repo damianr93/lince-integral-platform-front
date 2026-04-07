@@ -65,8 +65,6 @@ export function isNavItemVisible(entry: AppModuleNav, user: AuthUser): boolean {
   if (!entry.requiresModule) return true;
   // SUPERADMIN ve todos los módulos (igual que el backend siempre lo deja pasar)
   if (user.globalRole === GlobalRole.SUPERADMIN) return true;
-  // Soporte IT siempre visible para usuarios autenticados.
-  if (entry.requiresModule === ModuleKey.SOPORTE_IT) return true;
   return user.modules[entry.requiresModule]?.enabled === true;
 }
 

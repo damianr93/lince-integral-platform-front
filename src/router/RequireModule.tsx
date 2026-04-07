@@ -11,8 +11,11 @@ export function RequireModule({ moduleKey }: RequireModuleProps) {
   if (!user) return null;
   // SUPERADMIN accede a todo (igual que el backend)
   if (user.globalRole === GlobalRole.SUPERADMIN) return <Outlet />;
-  // Soporte IT es acceso base para cualquier usuario autenticado.
-  if (moduleKey === ModuleKey.SOPORTE_IT) return <Outlet />;
+  const isTag = user.area?.toUpperCase() === 'TAG';
+  if (isTag) {
+    if (moduleKey === ModuleKey.OCR) return <Outlet />;
+    return <Navigate to="/ocr/remitos" replace />;
+  }
   if (user.modules[moduleKey]?.enabled !== true) {
     return <Navigate to="/" replace />;
   }
