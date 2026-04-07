@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { GlobalRole, ModuleKey } from '@/types';
+import { OcrRole } from '@/types/ocr.types';
 import { useAppSelector } from '@/store';
 import { PrivateRoute } from './PrivateRoute';
 import { RequireModule } from './RequireModule';
@@ -128,6 +129,23 @@ function SoporteItIndexRedirect() {
       replace
     />
   );
+}
+
+function OcrIndexRedirect() {
+  const user = useAppSelector((s) => s.auth.user);
+  if (!user) return <Navigate to="/login" replace />;
+
+  if (user.globalRole === GlobalRole.ADMIN || user.globalRole === GlobalRole.SUPERADMIN) {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <OcrDashboardPage />
+      </Suspense>
+    );
+  }
+
+  const ocrRole = user.modules?.ocr?.role as OcrRole | undefined;
+  if (ocrRole === OcrRole.ADMINISTRATIVO) return <Navigate to="/ocr/facturas" replace />;
+  return <Navigate to="/ocr/remitos" replace />;
 }
 
 const router = createBrowserRouter([
@@ -412,11 +430,7 @@ const router = createBrowserRouter([
                 children: [
                   {
                     index: true,
-                    element: (
-                      <Suspense fallback={<PageLoader />}>
-                        <OcrDashboardPage />
-                      </Suspense>
-                    ),
+                    element: <OcrIndexRedirect />,
                   },
                   {
                     path: 'remitos',

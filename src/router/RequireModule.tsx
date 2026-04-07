@@ -16,6 +16,7 @@ export function RequireModule({ moduleKey }: RequireModuleProps) {
     if (moduleKey === ModuleKey.OCR) return <Outlet />;
     return <Navigate to="/ocr/remitos" replace />;
   }
+  if (moduleKey === ModuleKey.SOPORTE_IT) return <Outlet />;
   if (user.modules[moduleKey]?.enabled !== true) {
     return <Navigate to="/" replace />;
   }
