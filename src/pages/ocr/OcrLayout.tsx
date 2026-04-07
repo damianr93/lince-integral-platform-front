@@ -2,15 +2,12 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { Camera, FileText, LayoutDashboard, Settings } from 'lucide-react';
 import { useAppSelector } from '@/store';
 import { GlobalRole } from '@/types';
-import { OcrRole } from '@/types/ocr.types';
 
 export function OcrLayout() {
   const user = useAppSelector((s) => s.auth.user);
 
   const isAdmin = user?.globalRole === GlobalRole.ADMIN || user?.globalRole === GlobalRole.SUPERADMIN;
   const isSuperAdmin = user?.globalRole === GlobalRole.SUPERADMIN;
-  const ocrRole = user?.modules?.['ocr']?.role as OcrRole | undefined;
-  const isAdminOrAdministrativo = isAdmin || ocrRole === OcrRole.ADMINISTRATIVO;
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     [
@@ -23,22 +20,18 @@ export function OcrLayout() {
   return (
     <div className="flex flex-col h-full">
       <div className="border-b border-border px-3 sm:px-6 py-2 flex items-center gap-1 overflow-x-auto">
-        {isAdmin && (
-          <NavLink to="/ocr" end className={navClass}>
-            <LayoutDashboard className="h-4 w-4" />
-            Dashboard
-          </NavLink>
-        )}
+        <NavLink to="/ocr" end className={navClass}>
+          <LayoutDashboard className="h-4 w-4" />
+          Dashboard
+        </NavLink>
         <NavLink to="/ocr/remitos" className={navClass}>
           <Camera className="h-4 w-4" />
           Remitos
         </NavLink>
-        {isAdminOrAdministrativo && (
-          <NavLink to="/ocr/facturas" className={navClass}>
-            <FileText className="h-4 w-4" />
-            Facturas
-          </NavLink>
-        )}
+        <NavLink to="/ocr/facturas" className={navClass}>
+          <FileText className="h-4 w-4" />
+          Facturas
+        </NavLink>
         {isSuperAdmin && (
           <NavLink to="/ocr/configuracion" className={navClass}>
             <Settings className="h-4 w-4" />
