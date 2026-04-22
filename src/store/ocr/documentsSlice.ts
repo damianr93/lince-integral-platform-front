@@ -9,26 +9,29 @@ import { DocumentType } from '@/types/ocr.types';
 
 interface DocumentsState {
   /** Vista ADMIN: todos los documentos */
-  all:          PaginatedDocuments | null;
+  all:            PaginatedDocuments | null;
   /** Vista ADMIN: cola de revisión */
-  reviewQueue:  PaginatedDocuments | null;
+  reviewQueue:    PaginatedDocuments | null;
   /** Vista ADMINISTRATIVO: sus facturas */
-  myFacturas:   PaginatedDocuments | null;
+  myFacturas:     PaginatedDocuments | null;
+  /** Vista ADMINISTRATIVO: sus retenciones */
+  myRetenciones:  PaginatedDocuments | null;
   /** Documento abierto en detalle */
-  current:      OcrDocument | null;
-  loading:      boolean;
-  submitting:   boolean;
-  error:        string | null;
+  current:        OcrDocument | null;
+  loading:        boolean;
+  submitting:     boolean;
+  error:          string | null;
 }
 
 const initialState: DocumentsState = {
-  all:         null,
-  reviewQueue: null,
-  myFacturas:  null,
-  current:     null,
-  loading:     false,
-  submitting:  false,
-  error:       null,
+  all:           null,
+  reviewQueue:   null,
+  myFacturas:    null,
+  myRetenciones: null,
+  current:       null,
+  loading:       false,
+  submitting:    false,
+  error:         null,
 };
 
 // ── Thunks ────────────────────────────────────────────────────────────────────
@@ -46,6 +49,11 @@ export const fetchReviewQueue = createAsyncThunk(
 export const fetchMyFacturas = createAsyncThunk(
   'ocrDocuments/fetchMyFacturas',
   (params: FilterDocumentsParams = {}) => ocrApi.getMyFacturas(params),
+);
+
+export const fetchMyRetenciones = createAsyncThunk(
+  'ocrDocuments/fetchMyRetenciones',
+  (params: FilterDocumentsParams = {}) => ocrApi.getMyRetenciones(params),
 );
 
 export const fetchDocument = createAsyncThunk(
@@ -131,6 +139,18 @@ const documentsSlice = createSlice({
         state.error = action.error.message ?? 'Error al cargar facturas';
       });
 
+    // fetchMyRetenciones
+    builder
+      .addCase(fetchMyRetenciones.pending,   (state) => { state.loading = true; state.error = null; })
+      .addCase(fetchMyRetenciones.fulfilled, (state, action) => {
+        state.loading = false;
+        state.myRetenciones = action.payload;
+      })
+      .addCase(fetchMyRetenciones.rejected,  (state, action) => {
+        state.loading = false;
+        state.error = action.error.message ?? 'Error al cargar retenciones';
+      });
+
     // fetchDocument (detalle)
     builder
       .addCase(fetchDocument.pending,   (state) => { state.loading = true; state.error = null; })
@@ -178,7 +198,10 @@ const documentsSlice = createSlice({
       .addCase(updateDocumentFields.fulfilled, (state, action) => {
         state.submitting = false;
         const updated = action.payload;
-        state.myFacturas = updateDocInList(state.myFacturas, updated);
+        state.all           = updateDocInList(state.all, updated);
+        state.reviewQueue   = updateDocInList(state.reviewQueue, updated);
+        state.myFacturas    = updateDocInList(state.myFacturas, updated);
+        state.myRetenciones = updateDocInList(state.myRetenciones, updated);
         if (state.current?.id === updated.id) state.current = updated;
       })
       .addCase(updateDocumentFields.rejected,  (state, action) => {
@@ -196,9 +219,10 @@ const documentsSlice = createSlice({
           if (!list) return list;
           return { ...list, items: list.items.filter((d) => d.id !== id), total: list.total - 1 };
         };
-        state.all         = removeFromList(state.all);
-        state.reviewQueue = removeFromList(state.reviewQueue);
-        state.myFacturas  = removeFromList(state.myFacturas);
+        state.all           = removeFromList(state.all);
+        state.reviewQueue   = removeFromList(state.reviewQueue);
+        state.myFacturas    = removeFromList(state.myFacturas);
+        state.myRetenciones = removeFromList(state.myRetenciones);
         if (state.current?.id === id) state.current = null;
       })
       .addCase(deleteDocument.rejected,  (state, action) => {

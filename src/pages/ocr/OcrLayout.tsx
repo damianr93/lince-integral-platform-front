@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Camera, FileText, LayoutDashboard, Settings } from 'lucide-react';
+import { Camera, FileText, LayoutDashboard, Receipt, Settings } from 'lucide-react';
 import { useAppSelector } from '@/store';
 import { GlobalRole } from '@/types';
 
@@ -31,6 +31,10 @@ export function OcrLayout() {
         <NavLink to="/ocr/facturas" className={navClass}>
           <FileText className="h-4 w-4" />
           Facturas
+        </NavLink>
+        <NavLink to="/ocr/retenciones" className={navClass}>
+          <Receipt className="h-4 w-4" />
+          Retenciones
         </NavLink>
         {isSuperAdmin && (
           <NavLink to="/ocr/configuracion" className={navClass}>

@@ -1,25 +1,38 @@
 /**
- * OcrFacturasPage — Panel ADMINISTRATIVO
+ * OcrRetencionesPage — Panel ADMINISTRATIVO para certificados de retención
  *
- * Flujo completo:
- *  1. Upload de factura (PDF o imagen) con presigned S3 URL
+ * Extrae automáticamente:
+ *  - CUIT del Agente de Retención (emisor del certificado)
+ *  - Tipo de impuesto: GANANCIAS o IIBB
+ *  - Monto de la retención
+ *
+ * Flujo:
+ *  1. Upload de certificado SI.CO.RE. (PDF o imagen)
  *  2. OCR asíncrono → polling hasta que termina
- *  3. Listado de facturas propias con estado
- *  4. Corrección de campos extraídos incorrectamente
+ *  3. Listado de retenciones propias con estado
+ *  4. Corrección manual de campos incorrectamente extraídos
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Upload, FileText, Edit2, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, FlaskConical } from 'lucide-react';
+import {
+  Upload, FileText, Edit2, RefreshCw, AlertTriangle,
+  ChevronLeft, ChevronRight, FlaskConical,
+} from 'lucide-react';
 import * as ocrApi from '@/api/ocr';
 import { OcrTestModal } from './components/OcrTestModal';
 import { useAppDispatch, useAppSelector } from '@/store';
-import { fetchMyFacturas, updateDocumentFields, clearCurrent, fetchDocument } from '@/store/ocr/documentsSlice';
+import {
+  fetchMyRetenciones,
+  updateDocumentFields,
+  clearCurrent,
+  fetchDocument,
+} from '@/store/ocr/documentsSlice';
 import type { FilterDocumentsParams, OcrDocument } from '@/types/ocr.types';
 import { DocumentStatus, DocumentType } from '@/types/ocr.types';
 import { StatusBadge } from './components/StatusBadge';
 
-// ── Tipos ─────────────────────────────────────────────────────────────────────
+// ── Tipos locales ──────────────────────────────────────────────────────────────
 
 type UploadStep = 'idle' | 'uploading' | 'polling' | 'done' | 'error';
 
@@ -27,17 +40,30 @@ const EDITABLE_STATUSES = [DocumentStatus.CON_ERRORES, DocumentStatus.VALIDO, Do
 const POLL_INTERVAL_MS  = 2500;
 const POLL_MAX_RETRIES  = 24;
 
+/** Campos extraídos por OCR para retenciones */
+const DEFAULT_RETENCION_FIELDS: Record<string, string> = {
+  cuitEmisor:   '',
+  tipoImpuesto: '',
+  monto:        '',
+};
+
+const FIELD_LABELS: Record<string, string> = {
+  cuitEmisor:   'CUIT del Agente de Retención',
+  tipoImpuesto: 'Tipo de impuesto (GANANCIAS / IIBB)',
+  monto:        'Monto de la retención',
+};
+
 // ── Componente principal ──────────────────────────────────────────────────────
 
-export function OcrFacturasPage() {
+export function OcrRetencionesPage() {
   const dispatch = useAppDispatch();
-  const { myFacturas, loading, submitting, error, current } = useAppSelector((s) => s.ocrDocuments);
+  const { myRetenciones, loading, submitting, error, current } = useAppSelector((s) => s.ocrDocuments);
 
-  const [uploadStep, setUploadStep]     = useState<UploadStep>('idle');
-  const [uploadPct, setUploadPct]       = useState(0);
-  const [pollStatus, setPollStatus]     = useState<DocumentStatus | null>(null);
-  const [detailDoc, setDetailDoc]       = useState<OcrDocument | null>(null);
-  const [filters, setFilters]           = useState<FilterDocumentsParams>({ page: 1, limit: 10 });
+  const [uploadStep, setUploadStep]   = useState<UploadStep>('idle');
+  const [uploadPct, setUploadPct]     = useState(0);
+  const [pollStatus, setPollStatus]   = useState<DocumentStatus | null>(null);
+  const [detailDoc, setDetailDoc]     = useState<OcrDocument | null>(null);
+  const [filters, setFilters]         = useState<FilterDocumentsParams>({ page: 1, limit: 10 });
 
   const fileInputRef     = useRef<HTMLInputElement>(null);
   const testFileInputRef = useRef<HTMLInputElement>(null);
@@ -62,7 +88,7 @@ export function OcrFacturasPage() {
     setTestFields(null);
 
     try {
-      const result = await ocrApi.testExtract(file, DocumentType.FACTURA);
+      const result = await ocrApi.testExtract(file, DocumentType.RETENCION);
       setTestFields(result.fields);
     } catch (err) {
       setTestError((err as Error).message);
@@ -72,7 +98,7 @@ export function OcrFacturasPage() {
   }, []);
 
   useEffect(() => {
-    dispatch(fetchMyFacturas(filters));
+    dispatch(fetchMyRetenciones(filters));
   }, [dispatch, filters]);
 
   // ── Upload ────────────────────────────────────────────────────────────────
@@ -93,7 +119,7 @@ export function OcrFacturasPage() {
     setUploadPct(0);
 
     try {
-      const { uploadUrl, documentId } = await ocrApi.requestUploadUrl(DocumentType.FACTURA, contentType);
+      const { uploadUrl, documentId } = await ocrApi.requestUploadUrl(DocumentType.RETENCION, contentType);
 
       await ocrApi.uploadToS3(uploadUrl, file, contentType, setUploadPct);
       await ocrApi.confirmUpload(documentId);
@@ -120,11 +146,11 @@ export function OcrFacturasPage() {
         setPollStatus(status);
         if (status !== DocumentStatus.PROCESANDO && status !== DocumentStatus.PENDIENTE) {
           setUploadStep('done');
-          dispatch(fetchMyFacturas(filters));
+          dispatch(fetchMyRetenciones(filters));
           if (status === DocumentStatus.VALIDO) {
-            toast.success('Factura procesada correctamente');
+            toast.success('Retención procesada correctamente');
           } else if (status === DocumentStatus.CON_ERRORES) {
-            toast.warning('La factura tiene errores — podés corregir los campos en la tabla');
+            toast.warning('La retención tiene errores — podés corregir los campos en la tabla');
           }
           return;
         }
@@ -154,16 +180,18 @@ export function OcrFacturasPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  const docs  = myFacturas?.items ?? [];
-  const total = myFacturas?.total ?? 0;
-  const page  = myFacturas?.page ?? filters.page ?? 1;
-  const pages = myFacturas?.pages ?? 1;
+  const docs  = myRetenciones?.items ?? [];
+  const total = myRetenciones?.total ?? 0;
+  const page  = myRetenciones?.page  ?? filters.page ?? 1;
+  const pages = myRetenciones?.pages ?? 1;
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <div>
-        <h1 className="text-lg font-semibold text-foreground">Mis Facturas</h1>
-        <p className="text-sm text-muted-foreground mt-1">Cargá facturas y corregí los campos extraídos por OCR</p>
+        <h1 className="text-lg font-semibold text-foreground">Mis Retenciones</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Cargá certificados de retención (SI.CO.RE.) — el sistema extrae el CUIT, tipo de impuesto y monto
+        </p>
       </div>
 
       {error && (
@@ -180,8 +208,10 @@ export function OcrFacturasPage() {
             className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors"
           >
             <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-            <p className="text-sm font-semibold text-foreground">Subir factura</p>
-            <p className="text-xs text-muted-foreground mt-1">PDF o imagen · El sistema extrae los campos automáticamente</p>
+            <p className="text-sm font-semibold text-foreground">Subir certificado de retención</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              PDF o imagen del formulario SI.CO.RE. · El sistema extrae CUIT, impuesto y monto
+            </p>
             <button className="mt-4 px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
               Seleccionar archivo
             </button>
@@ -194,7 +224,6 @@ export function OcrFacturasPage() {
             />
           </div>
 
-          {/* Prueba directa sin S3 */}
           <button
             onClick={() => testFileInputRef.current?.click()}
             className="w-full py-2.5 text-sm rounded-xl border border-primary text-primary font-medium hover:bg-primary/10 flex items-center justify-center gap-2"
@@ -214,7 +243,7 @@ export function OcrFacturasPage() {
       {uploadStep === 'uploading' && (
         <div className="border border-border rounded-xl p-6 text-center space-y-4">
           <Upload className="h-10 w-10 mx-auto text-primary animate-bounce" />
-          <p className="text-sm font-medium text-foreground">Subiendo factura…</p>
+          <p className="text-sm font-medium text-foreground">Subiendo certificado…</p>
           <div className="w-full bg-muted rounded-full h-2">
             <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${uploadPct}%` }} />
           </div>
@@ -226,7 +255,7 @@ export function OcrFacturasPage() {
         <div className="border border-border rounded-xl p-6 text-center space-y-3">
           <RefreshCw className="h-10 w-10 mx-auto text-blue-500 animate-spin" />
           <p className="text-sm font-medium text-foreground">Procesando OCR…</p>
-          <p className="text-xs text-muted-foreground">Extrayendo campos de la factura. Puede tardar hasta 30 segundos.</p>
+          <p className="text-xs text-muted-foreground">Extrayendo CUIT, impuesto y monto del certificado.</p>
           {pollStatus && <StatusBadge status={pollStatus} />}
         </div>
       )}
@@ -243,14 +272,14 @@ export function OcrFacturasPage() {
         </div>
       )}
 
-      {/* ── Lista de facturas ─────────────────────────────────────────────── */}
+      {/* ── Lista de retenciones ──────────────────────────────────────────── */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">Facturas cargadas</h2>
+          <h2 className="text-sm font-semibold text-foreground">Retenciones cargadas</h2>
           <div className="flex items-center gap-2">
-            <p className="text-xs text-muted-foreground">{total} facturas</p>
+            <p className="text-xs text-muted-foreground">{total} retenciones</p>
             <button
-              onClick={() => dispatch(fetchMyFacturas(filters))}
+              onClick={() => dispatch(fetchMyRetenciones(filters))}
               disabled={loading}
               className="p-1 rounded hover:bg-accent disabled:opacity-50"
             >
@@ -259,51 +288,57 @@ export function OcrFacturasPage() {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[480px]">
+          <table className="w-full text-sm min-w-[520px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">ID</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Estado OCR</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Fecha</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Total</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">CUIT Emisor</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Impuesto</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Monto</th>
                 <th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading && docs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">
                     <RefreshCw className="h-4 w-4 animate-spin inline mr-2" />Cargando…
                   </td>
                 </tr>
               ) : docs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground text-sm">
-                    Todavía no subiste ninguna factura
+                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                    Todavía no subiste ningún certificado de retención
                   </td>
                 </tr>
               ) : (
-                docs.map((f) => (
-                  <tr key={f.id} className="hover:bg-muted/50">
-                    <td className="px-4 py-2.5 font-medium text-foreground flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="font-mono text-xs">{f.id.slice(0, 8)}…</span>
+                docs.map((doc) => (
+                  <tr key={doc.id} className="hover:bg-muted/50">
+                    <td className="px-4 py-2.5 font-medium text-foreground">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="font-mono text-xs">{doc.id.slice(0, 8)}…</span>
+                      </div>
                     </td>
                     <td className="px-4 py-2.5">
-                      <StatusBadge status={f.status} />
+                      <StatusBadge status={doc.status} />
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground text-xs font-mono">
+                      {doc.extractedData?.['cuitEmisor'] || '—'}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground text-xs">
-                      {new Date(f.createdAt).toLocaleDateString('es-AR')}
+                      {doc.extractedData?.['tipoImpuesto'] || '—'}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground text-xs">
-                      {f.extractedData?.['total'] || '—'}
+                      {doc.extractedData?.['monto'] ? `$\u00a0${doc.extractedData['monto']}` : '—'}
                     </td>
                     <td className="px-4 py-2.5">
                       <button
-                        onClick={() => openDetail(f)}
+                        onClick={() => openDetail(doc)}
                         className="px-2 py-1 text-xs rounded bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1"
                       >
-                        {EDITABLE_STATUSES.includes(f.status)
+                        {EDITABLE_STATUSES.includes(doc.status)
                           ? <><Edit2 className="h-3 w-3" /> Corregir</>
                           : 'Ver detalle'}
                       </button>
@@ -340,20 +375,24 @@ export function OcrFacturasPage() {
       )}
 
       <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-900/20 dark:border-blue-800">
-        <p className="text-xs text-blue-700 dark:text-blue-400 font-medium mb-1">Corrección de campos</p>
+        <p className="text-xs text-blue-700 dark:text-blue-400 font-medium mb-1">Campos extraídos</p>
         <p className="text-xs text-blue-600 dark:text-blue-400">
-          Podés corregir campos mal extraídos en facturas con estado "Con errores" o "Válido".
-          La aprobación final siempre la realiza el equipo ADMIN.
+          El sistema extrae el CUIT del emisor, tipo de impuesto y monto del certificado.
+          Podés corregir cualquier campo mal extraído antes de que el ADMIN lo apruebe.
         </p>
       </div>
 
       {/* Modal test OCR sin S3 */}
       <OcrTestModal
         open={testModalOpen}
-        onClose={() => { setTestModalOpen(false); if (testPreview) URL.revokeObjectURL(testPreview); setTestPreview(null); }}
+        onClose={() => {
+          setTestModalOpen(false);
+          if (testPreview) URL.revokeObjectURL(testPreview);
+          setTestPreview(null);
+        }}
         loading={testLoading}
         error={testError}
-        type={DocumentType.FACTURA}
+        type={DocumentType.RETENCION}
         fields={testFields}
         preview={testPreview}
       />
@@ -368,7 +407,7 @@ export function OcrFacturasPage() {
             if (updateDocumentFields.fulfilled.match(result)) {
               toast.success('Campos guardados');
               closeDetail();
-              dispatch(fetchMyFacturas(filters));
+              dispatch(fetchMyRetenciones(filters));
             } else {
               toast.error(String(result.error?.message ?? 'Error al guardar'));
             }
@@ -393,12 +432,7 @@ function CorrectFieldsModal({
   const canEdit = EDITABLE_STATUSES.includes(doc.status);
   const [fields, setFields] = useState<Record<string, string>>(doc.extractedData ?? {});
 
-  // Default fields si extractedData está vacío (OCR no configurado)
-  const defaultFields = doc.type === DocumentType.FACTURA
-    ? { numero: '', fecha: '', proveedor: '', cuit: '', neto: '', iva: '', total: '', tipo: '' }
-    : { numero: '', fecha: '', proveedor: '', destinatario: '', total: '' };
-
-  const allFields = { ...defaultFields, ...fields };
+  const allFields = { ...DEFAULT_RETENCION_FIELDS, ...fields };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
@@ -407,7 +441,7 @@ function CorrectFieldsModal({
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-base font-semibold text-foreground">
-              {doc.type} — {doc.id.slice(0, 8)}…
+              Retención — {doc.id.slice(0, 8)}…
             </h2>
             <StatusBadge status={doc.status} />
           </div>
@@ -415,7 +449,7 @@ function CorrectFieldsModal({
         </div>
 
         <div className="px-6 py-4 space-y-4 max-h-[65vh] overflow-y-auto">
-          {/* Preview o placeholder */}
+          {/* Preview */}
           {doc.viewUrl ? (
             doc.s3Key.endsWith('.pdf') ? (
               <div className="bg-muted/40 rounded-lg h-32 flex items-center justify-center border border-border">
@@ -424,7 +458,7 @@ function CorrectFieldsModal({
                 </a>
               </div>
             ) : (
-              <img src={doc.viewUrl} alt="Factura" className="w-full rounded-lg border border-border object-contain max-h-48" />
+              <img src={doc.viewUrl} alt="Retención" className="w-full rounded-lg border border-border object-contain max-h-48" />
             )
           ) : (
             <div className="bg-muted/40 rounded-lg h-32 flex items-center justify-center border border-border">
@@ -455,10 +489,11 @@ function CorrectFieldsModal({
               const hasError = doc.validationErrors?.some((e) =>
                 e.toLowerCase().includes(key.toLowerCase()),
               );
+              const label = FIELD_LABELS[key] ?? key;
               return (
                 <div key={key}>
-                  <label className="block text-xs font-medium text-foreground mb-1 capitalize">
-                    {key.replace(/([A-Z])/g, ' $1')}
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    {label}
                   </label>
                   <input
                     type="text"
@@ -473,6 +508,9 @@ function CorrectFieldsModal({
                       !canEdit ? 'opacity-60 cursor-not-allowed' : '',
                     ].join(' ')}
                   />
+                  {key === 'tipoImpuesto' && canEdit && (
+                    <p className="text-xs text-muted-foreground mt-1">Valores válidos: GANANCIAS o IIBB</p>
+                  )}
                 </div>
               );
             })}

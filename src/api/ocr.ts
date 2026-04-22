@@ -1,4 +1,4 @@
-import { api, getAccessToken, API_BASE_URL } from './client';
+import { api, apiFetch } from './client';
 import type {
   FilterDocumentsParams,
   OcrConfig,
@@ -81,6 +81,29 @@ export function getMyFacturas(params: FilterDocumentsParams = {}): Promise<Pagin
   return api.get<PaginatedDocuments>(`${BASE}/facturas${qs}`);
 }
 
+/** ADMINISTRATIVO: solo sus retenciones */
+export function getMyRetenciones(params: FilterDocumentsParams = {}): Promise<PaginatedDocuments> {
+  const qs = buildQs(params);
+  return api.get<PaginatedDocuments>(`${BASE}/retenciones${qs}`);
+}
+
+/**
+ * Probar extracción OCR directamente sobre un archivo sin subirlo a S3.
+ * Solo para testing — no persiste nada en DB.
+ */
+export async function testExtract(
+  file: File,
+  type: DocumentType,
+): Promise<{ fields: Record<string, string> }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('type', type);
+  return apiFetch<{ fields: Record<string, string> }>(`${BASE}/test-extract`, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
 /** ADMIN: cola de documentos pendientes de revisión */
 export function getReviewQueue(params: FilterDocumentsParams = {}): Promise<PaginatedDocuments> {
   const qs = buildQs(params);
@@ -90,6 +113,11 @@ export function getReviewQueue(params: FilterDocumentsParams = {}): Promise<Pagi
 /** Detalle de un documento (incluye viewUrl presigned) */
 export function getDocument(id: string): Promise<OcrDocument> {
   return api.get<OcrDocument>(`${BASE}/${id}`);
+}
+
+/** Obtiene una presigned view URL fresca para el documento (sin traer todo el detalle) */
+export function getDocumentViewUrl(id: string): Promise<{ viewUrl: string | null }> {
+  return api.get<{ viewUrl: string | null }>(`${BASE}/${id}/view-url`);
 }
 
 /** Polling de estado — liviano, solo devuelve id + status + errores */
@@ -147,14 +175,3 @@ function buildQs(params: FilterDocumentsParams): string {
   return p.length ? `?${p.join('&')}` : '';
 }
 
-/**
- * Utilidad para obtener una URL de visualización del documento.
- * Redirige a través del backend (que genera la presigned URL de S3) para
- * no exponer el bucket directamente.
- *
- * Uso en <img src={getDocumentViewUrl(doc.id)} /> o en un <a> para PDF.
- */
-export function getDocumentViewUrl(documentId: string): string {
-  const token = getAccessToken();
-  return `${API_BASE_URL}/ocr/documents/${documentId}?token=${token ?? ''}`;
-}

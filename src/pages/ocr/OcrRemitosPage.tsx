@@ -10,15 +10,16 @@
  *
  * Credenciales:
  *  - Sin S3 configurado → el backend devuelve error → se muestra "Servicio no disponible"
- *  - Sin Vision → el OCR termina con estado CON_ERRORES (mensaje claro en errores)
+ *  - Sin engine OCR configurado (Document AI/Vision) → estado CON_ERRORES con mensaje claro
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Camera, Upload, Wifi, WifiOff, CheckCircle, Clock, AlertTriangle, X, RefreshCw, Trash2 } from 'lucide-react';
+import { Camera, Upload, Wifi, WifiOff, CheckCircle, Clock, AlertTriangle, X, RefreshCw, Trash2, FlaskConical } from 'lucide-react';
 import * as ocrApi from '@/api/ocr';
 import { DocumentStatus, DocumentType } from '@/types/ocr.types';
 import { StatusBadge } from './components/StatusBadge';
+import { OcrTestModal } from './components/OcrTestModal';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { fetchMyFacturas } from '@/store/ocr/documentsSlice';
 
@@ -53,6 +54,29 @@ export function OcrRemitosPage() {
   const [pollErrors, setPollErrors]   = useState<string[] | null>(null);
   const [queue, setQueue]             = useState<QueueItem[]>(() => loadQueue());
   const [cameraError, setCameraError] = useState<string | null>(null);
+
+  // ── Test OCR sin S3 ─────────────────────────────────────────────────────────
+  const [testModalOpen,    setTestModalOpen]    = useState(false);
+  const [testLoading,      setTestLoading]      = useState(false);
+  const [testError,        setTestError]        = useState<string | null>(null);
+  const [testFields,       setTestFields]       = useState<Record<string, string> | null>(null);
+
+  const handleTestExtract = useCallback(async () => {
+    if (!capturedBlob) return;
+    setTestModalOpen(true);
+    setTestLoading(true);
+    setTestError(null);
+    setTestFields(null);
+    try {
+      const file   = capturedBlob instanceof File ? capturedBlob : new File([capturedBlob], 'remito.jpg', { type: capturedBlob.type || 'image/jpeg' });
+      const result = await ocrApi.testExtract(file, DocumentType.REMITO);
+      setTestFields(result.fields);
+    } catch (err) {
+      setTestError((err as Error).message);
+    } finally {
+      setTestLoading(false);
+    }
+  }, [capturedBlob]);
 
   const videoRef    = useRef<HTMLVideoElement>(null);
   const streamRef   = useRef<MediaStream | null>(null);
@@ -356,19 +380,27 @@ export function OcrRemitosPage() {
       {step === 'preview' && previewUrl && (
         <div className="border border-border rounded-xl overflow-hidden">
           <img src={previewUrl} alt="Preview remito" className="w-full object-contain max-h-64 bg-black" />
-          <div className="p-4 flex gap-2 bg-card">
+          <div className="p-4 flex flex-col gap-2 bg-card">
             <button
-              onClick={cancelCapture}
-              className="flex-1 py-2 text-sm rounded-md border border-border text-muted-foreground hover:bg-accent"
+              onClick={handleTestExtract}
+              className="w-full py-2 text-sm rounded-md border border-primary text-primary font-medium hover:bg-primary/10 flex items-center justify-center gap-2"
             >
-              Descartar
+              <FlaskConical className="h-4 w-4" /> Probar OCR
             </button>
-            <button
-              onClick={uploadDocument}
-              className="flex-1 py-2 text-sm rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 flex items-center justify-center gap-2"
-            >
-              <Upload className="h-4 w-4" /> Enviar
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={cancelCapture}
+                className="flex-1 py-2 text-sm rounded-md border border-border text-muted-foreground hover:bg-accent"
+              >
+                Descartar
+              </button>
+              <button
+                onClick={uploadDocument}
+                className="flex-1 py-2 text-sm rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 flex items-center justify-center gap-2"
+              >
+                <Upload className="h-4 w-4" /> Enviar
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -487,6 +519,17 @@ export function OcrRemitosPage() {
           </div>
         </div>
       )}
+
+      {/* ── Modal test OCR ────────────────────────────────────────── */}
+      <OcrTestModal
+        open={testModalOpen}
+        onClose={() => setTestModalOpen(false)}
+        loading={testLoading}
+        error={testError}
+        type={DocumentType.REMITO}
+        fields={testFields}
+        preview={previewUrl}
+      />
     </div>
   );
 }

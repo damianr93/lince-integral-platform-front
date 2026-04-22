@@ -3,11 +3,16 @@
 type AuthGetter = () => { accessToken: string | null; refreshToken: string | null };
 type AuthActions = {
   setAccessToken: (token: string) => void;
+  setTokens: (tokens: { accessToken: string; refreshToken: string }) => void;
   clearAuth: () => void;
 };
 
 let _getAuth: AuthGetter = () => ({ accessToken: null, refreshToken: null });
-let _authActions: AuthActions = { setAccessToken: () => {}, clearAuth: () => {} };
+let _authActions: AuthActions = {
+  setAccessToken: () => {},
+  setTokens: () => {},
+  clearAuth: () => {},
+};
 
 // Singleton refresh: evita que requests paralelas hagan múltiples refresh simultáneos
 let _refreshPromise: Promise<string | null> | null = null;
@@ -60,8 +65,11 @@ export async function apiFetch<T = unknown>(
       })
         .then(async (r) => {
           if (!r.ok) return null;
-          const data = (await r.json()) as { accessToken: string };
-          _authActions.setAccessToken(data.accessToken);
+          const data = (await r.json()) as { accessToken: string; refreshToken: string };
+          _authActions.setTokens({
+            accessToken: data.accessToken,
+            refreshToken: data.refreshToken,
+          });
           return data.accessToken;
         })
         .finally(() => { _refreshPromise = null; });

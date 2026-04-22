@@ -8,8 +8,9 @@ export enum OcrRole {
 }
 
 export enum DocumentType {
-  REMITO  = 'REMITO',
-  FACTURA = 'FACTURA',
+  REMITO    = 'REMITO',
+  FACTURA   = 'FACTURA',
+  RETENCION = 'RETENCION',
 }
 
 export enum DocumentStatus {

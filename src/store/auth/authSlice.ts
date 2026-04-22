@@ -66,6 +66,12 @@ const authSlice = createSlice({
     setAccessToken(state, action: PayloadAction<string>) {
       state.accessToken = action.payload;
     },
+    /** Tras POST /auth/refresh el servidor rota el refresh token; hay que persistir ambos. */
+    setTokens(state, action: PayloadAction<{ accessToken: string; refreshToken: string }>) {
+      state.accessToken = action.payload.accessToken;
+      state.refreshToken = action.payload.refreshToken;
+      saveToStorage(state);
+    },
     clearAuth(state) {
       state.user = null;
       state.accessToken = null;
@@ -82,5 +88,6 @@ const authSlice = createSlice({
   },
 });
 
-export const { setAuth, setAccessToken, clearAuth, clearMustChangePassword } = authSlice.actions;
+export const { setAuth, setAccessToken, setTokens, clearAuth, clearMustChangePassword } =
+  authSlice.actions;
 export default authSlice.reducer;

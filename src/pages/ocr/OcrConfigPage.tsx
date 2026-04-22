@@ -30,6 +30,11 @@ const AVAILABLE_FIELDS: Record<DocumentType, { key: string; label: string }[]> =
     { key: 'total',     label: 'Total' },
     { key: 'tipo',      label: 'Tipo de comprobante (A/B/C)' },
   ],
+  [DocumentType.RETENCION]: [
+    { key: 'cuitEmisor',   label: 'CUIT del Agente de Retención' },
+    { key: 'tipoImpuesto', label: 'Tipo de impuesto (GANANCIAS / IIBB)' },
+    { key: 'monto',        label: 'Monto de la retención' },
+  ],
 };
 
 export function OcrConfigPage() {
@@ -40,8 +45,9 @@ export function OcrConfigPage() {
 
   // Estado local de edición: tipo → conjunto de campos requeridos seleccionados
   const [required, setRequired] = useState<Record<DocumentType, Set<string>>>({
-    [DocumentType.REMITO]:  new Set(['numero', 'fecha', 'proveedor']),
-    [DocumentType.FACTURA]: new Set(['numero', 'fecha', 'proveedor', 'cuit', 'total']),
+    [DocumentType.REMITO]:    new Set(['numero', 'fecha', 'proveedor']),
+    [DocumentType.FACTURA]:   new Set(['numero', 'fecha', 'proveedor', 'cuit', 'total']),
+    [DocumentType.RETENCION]: new Set(['cuitEmisor', 'tipoImpuesto', 'monto']),
   });
 
   useEffect(() => {
@@ -184,7 +190,8 @@ export function OcrConfigPage() {
       <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-900/20 dark:border-blue-800">
         <p className="text-xs text-blue-700 dark:text-blue-400 font-medium mb-1">Nota sobre el OCR</p>
         <p className="text-xs text-blue-600 dark:text-blue-400">
-          Los campos son extraídos por Google Cloud Vision API. La precisión depende de la calidad de la imagen.
+          Los campos se extraen con Google Document AI (u OCR fallback según configuración).
+          La precisión depende de la calidad de la imagen.
           Los campos obligatorios no detectados generan alertas al equipo ADMIN y permiten corrección manual.
         </p>
       </div>

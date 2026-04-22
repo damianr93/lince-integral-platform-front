@@ -247,7 +247,7 @@ export function ClientsPage() {
                   paginated.map((c) => (
                     <tr key={c.id} className="hover:bg-muted/50 cursor-pointer" onClick={() => setModalCustomer(c)}>
                       <td className="px-4 py-2.5 text-foreground">
-                        {[c.nombre, c.apellido].filter(Boolean).join(' ') || <span className="text-muted-foreground">—</span>}
+                        {[c.nombre, c.apellido].filter(Boolean).join(' ') || '—'}
                       </td>
                       <td className="px-4 py-2.5 text-muted-foreground">{c.telefono}</td>
                       <td className="px-4 py-2.5 text-muted-foreground max-w-[140px]">
