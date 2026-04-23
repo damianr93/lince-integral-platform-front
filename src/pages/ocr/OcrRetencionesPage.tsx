@@ -17,16 +17,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Upload, FileText, Edit2, RefreshCw, AlertTriangle,
-  ChevronLeft, ChevronRight, FlaskConical,
+  ChevronLeft, ChevronRight, Trash2,
 } from 'lucide-react';
 import * as ocrApi from '@/api/ocr';
-import { OcrTestModal } from './components/OcrTestModal';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
   fetchMyRetenciones,
   updateDocumentFields,
   clearCurrent,
   fetchDocument,
+  deleteDocument,
 } from '@/store/ocr/documentsSlice';
 import type { FilterDocumentsParams, OcrDocument } from '@/types/ocr.types';
 import { DocumentStatus, DocumentType } from '@/types/ocr.types';
@@ -65,37 +65,7 @@ export function OcrRetencionesPage() {
   const [detailDoc, setDetailDoc]     = useState<OcrDocument | null>(null);
   const [filters, setFilters]         = useState<FilterDocumentsParams>({ page: 1, limit: 10 });
 
-  const fileInputRef     = useRef<HTMLInputElement>(null);
-  const testFileInputRef = useRef<HTMLInputElement>(null);
-
-  // ── Test OCR sin S3 ─────────────────────────────────────────────────────────
-  const [testModalOpen, setTestModalOpen] = useState(false);
-  const [testLoading,   setTestLoading]   = useState(false);
-  const [testError,     setTestError]     = useState<string | null>(null);
-  const [testFields,    setTestFields]    = useState<Record<string, string> | null>(null);
-  const [testPreview,   setTestPreview]   = useState<string | null>(null);
-
-  const handleTestFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-
-    const preview = URL.createObjectURL(file);
-    setTestPreview(preview);
-    setTestModalOpen(true);
-    setTestLoading(true);
-    setTestError(null);
-    setTestFields(null);
-
-    try {
-      const result = await ocrApi.testExtract(file, DocumentType.RETENCION);
-      setTestFields(result.fields);
-    } catch (err) {
-      setTestError((err as Error).message);
-    } finally {
-      setTestLoading(false);
-    }
-  }, []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     dispatch(fetchMyRetenciones(filters));
@@ -166,7 +136,7 @@ export function OcrRetencionesPage() {
     setPollStatus(null);
   };
 
-  // ── Detalle / Corrección ──────────────────────────────────────────────────
+  // ── Detalle / Corrección / Borrado ────────────────────────────────────────
 
   const openDetail = async (doc: OcrDocument) => {
     setDetailDoc(doc);
@@ -176,6 +146,17 @@ export function OcrRetencionesPage() {
   const closeDetail = () => {
     setDetailDoc(null);
     dispatch(clearCurrent());
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('¿Eliminar esta retención? Esta acción no se puede deshacer.')) return;
+    const result = await dispatch(deleteDocument(id));
+    if (deleteDocument.fulfilled.match(result)) {
+      toast.success('Retención eliminada');
+      dispatch(fetchMyRetenciones(filters));
+    } else {
+      toast.error('No se pudo eliminar la retención');
+    }
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -224,19 +205,6 @@ export function OcrRetencionesPage() {
             />
           </div>
 
-          <button
-            onClick={() => testFileInputRef.current?.click()}
-            className="w-full py-2.5 text-sm rounded-xl border border-primary text-primary font-medium hover:bg-primary/10 flex items-center justify-center gap-2"
-          >
-            <FlaskConical className="h-4 w-4" /> Probar OCR sin subir a S3
-          </button>
-          <input
-            ref={testFileInputRef}
-            type="file"
-            accept="image/*,application/pdf"
-            className="hidden"
-            onChange={handleTestFileChange}
-          />
         </div>
       )}
 
@@ -334,14 +302,23 @@ export function OcrRetencionesPage() {
                       {doc.extractedData?.['monto'] ? `$\u00a0${doc.extractedData['monto']}` : '—'}
                     </td>
                     <td className="px-4 py-2.5">
-                      <button
-                        onClick={() => openDetail(doc)}
-                        className="px-2 py-1 text-xs rounded bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1"
-                      >
-                        {EDITABLE_STATUSES.includes(doc.status)
-                          ? <><Edit2 className="h-3 w-3" /> Corregir</>
-                          : 'Ver detalle'}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => openDetail(doc)}
+                          className="px-2 py-1 text-xs rounded bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1"
+                        >
+                          {EDITABLE_STATUSES.includes(doc.status)
+                            ? <><Edit2 className="h-3 w-3" /> Corregir</>
+                            : 'Ver detalle'}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(doc.id)}
+                          title="Eliminar"
+                          className="p-1 rounded text-muted-foreground hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -381,21 +358,6 @@ export function OcrRetencionesPage() {
           Podés corregir cualquier campo mal extraído antes de que el ADMIN lo apruebe.
         </p>
       </div>
-
-      {/* Modal test OCR sin S3 */}
-      <OcrTestModal
-        open={testModalOpen}
-        onClose={() => {
-          setTestModalOpen(false);
-          if (testPreview) URL.revokeObjectURL(testPreview);
-          setTestPreview(null);
-        }}
-        loading={testLoading}
-        error={testError}
-        type={DocumentType.RETENCION}
-        fields={testFields}
-        preview={testPreview}
-      />
 
       {/* Modal de corrección */}
       {detailDoc && (
