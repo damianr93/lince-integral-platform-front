@@ -10,6 +10,7 @@ export enum ModuleKey {
   OCR = 'ocr',
   MARKETING = 'marketing',
   SOPORTE_IT = 'soporte-it',
+  ASISTENCIA = 'asistencia',
 }
 
 export interface ModulePermission {

@@ -113,6 +113,9 @@ const OcrRetencionesPage = lazy(() =>
 const OcrConfigPage = lazy(() =>
   import('@/pages/ocr/OcrConfigPage').then((m) => ({ default: m.OcrConfigPage })),
 );
+const RrhhPage = lazy(() =>
+  import('@/pages/rrhh/RrhhPage').then((m) => ({ default: m.RrhhPage })),
+);
 
 function PageLoader() {
   return (
@@ -454,6 +457,20 @@ const router = createBrowserRouter([
                     ),
                   },
                 ],
+              },
+            ],
+          },
+          {
+            path: 'rrhh',
+            element: <RequireModule moduleKey={ModuleKey.ASISTENCIA} />,
+            children: [
+              {
+                index: true,
+                element: (
+                  <Suspense fallback={<PageLoader />}>
+                    <RrhhPage />
+                  </Suspense>
+                ),
               },
             ],
           },
