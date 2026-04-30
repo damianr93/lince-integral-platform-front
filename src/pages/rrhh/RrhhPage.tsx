@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Clock, RefreshCw, Save } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Clock, FileSpreadsheet, RefreshCw, Save } from 'lucide-react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
 import { asistenciaApi } from '@/api/asistencia';
-import type { EmpleadoAsistencia, FichajeAsistencia, Planta } from '@/types';
+import type { EmpleadoAsistencia, FichajeAsistencia, Planta, ReporteEmpleadoRango } from '@/types';
 import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 
@@ -51,6 +53,7 @@ function formatSoloHora(iso: string): string {
 
 function formatDuracion(ms: number): string {
   if (ms < 0) return '—';
+  if (ms === 0) return '0 min';
   const h = Math.floor(ms / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
   if (h > 0) return `${h} h ${m} min`;
@@ -294,6 +297,8 @@ const VILLA_NUEVA_BASE: { pin: string; firstName: string; lastName: string }[] =
 ];
 
 export function RrhhPage() {
+  const location = useLocation();
+  const activeView = location.pathname.endsWith('/reportes') ? 'reportes' : 'general';
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -311,6 +316,12 @@ export function RrhhPage() {
   const [editHorariosOpen, setEditHorariosOpen] = useState(false);
   const [horarioEdits, setHorarioEdits] = useState<Record<string, HorarioEdit>>({});
   const [savingHorarios, setSavingHorarios] = useState(false);
+  const [reportEmpleadoId, setReportEmpleadoId] = useState('');
+  const [reportDesde, setReportDesde] = useState(() => addDaysYmdAr(todayYmdAr(), -30));
+  const [reportHasta, setReportHasta] = useState(todayYmdAr);
+  const [reportHorasEsperadas, setReportHorasEsperadas] = useState('8');
+  const [reportData, setReportData] = useState<ReporteEmpleadoRango | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -335,9 +346,22 @@ export function RrhhPage() {
     }
   };
 
+  const loadReportEmployees = async () => {
+    if (empleados.length > 0) return;
+    try {
+      setEmpleados(await asistenciaApi.getEmpleados(undefined));
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   useEffect(() => {
-    void loadData();
-  }, [diaFecha, estado, planta]);
+    if (activeView === 'general') {
+      void loadData();
+    } else {
+      void loadReportEmployees();
+    }
+  }, [activeView, diaFecha, estado, planta]);
 
   const onRefresh = async () => {
     await loadData();
@@ -363,6 +387,10 @@ export function RrhhPage() {
     () => buildEmployeeDayAggregates(itemsMismoDiaAr),
     [itemsMismoDiaAr],
   );
+
+  const reportExpectedHoursNum = Math.max(0, Number(reportHorasEsperadas) || 0);
+
+  const hasReport = reportData !== null;
 
   const draftFor = (row: FichajeAsistencia): RowDraft => {
     const existing = drafts[row.id];
@@ -482,6 +510,101 @@ export function RrhhPage() {
     void loadData();
   };
 
+  const loadEmployeeReport = async () => {
+    if (!reportEmpleadoId) {
+      toast.error('Seleccioná un empleado para generar el reporte');
+      return;
+    }
+    if (!reportDesde || !reportHasta || reportDesde > reportHasta) {
+      toast.error('Revisá el rango de fechas del reporte');
+      return;
+    }
+
+    setReportLoading(true);
+    try {
+      const data = await asistenciaApi.getReporteEmpleado(reportEmpleadoId, {
+        desde: reportDesde,
+        hasta: reportHasta,
+        horasEsperadasPorDia: reportExpectedHoursNum,
+      });
+      setReportData(data);
+      toast.success(`Reporte generado: ${data.dias.length} día(s)`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const exportEmployeeReportExcel = () => {
+    if (!reportData) {
+      toast.error('Generá un reporte antes de exportar');
+      return;
+    }
+
+    const employeeName = `${reportData.empleado.firstName} ${reportData.empleado.lastName}`;
+    const workbook = XLSX.utils.book_new();
+
+    const summaryRows = [
+      ['Reporte de asistencia'],
+      ['Empleado', employeeName],
+      ['PIN', reportData.empleado.pin],
+      ['Planta', reportData.empleado.planta],
+      ['Desde', reportData.desde],
+      ['Hasta', reportData.hasta],
+      ['Horas esperadas por día hábil', reportData.horasEsperadasPorDia],
+      [],
+      ['Días hábiles', reportData.resumen.diasHabiles],
+      ['Días con tramos', reportData.resumen.diasConTramos],
+      ['Horas esperadas', reportData.resumen.esperadoMs / 3600000],
+      ['Horas trabajadas', reportData.resumen.trabajadoMs / 3600000],
+      ['Saldo', reportData.resumen.saldoMs / 3600000],
+      ['Saldo legible', formatSaldoJornada(reportData.resumen.saldoMs)],
+    ];
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+    summarySheet['!cols'] = [{ wch: 30 }, { wch: 24 }];
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resumen');
+
+    const detailRows = reportData.dias.map((day) => {
+      const tramos = day.tramos
+        .map((p) => `${formatSoloHora(p.entrada.tiempo)} - ${formatSoloHora(p.salida.tiempo)} (${formatDuracion(p.ms)})`)
+        .join(' | ');
+      const observaciones = [
+        ...day.entradasSinSalida.map((f) => `Entrada sin salida ${formatSoloHora(f.tiempo)}`),
+        ...day.salidasSinEntrada.map((f) => `Salida sin entrada ${formatSoloHora(f.tiempo)}`),
+      ].join(' | ');
+      return {
+        Fecha: day.fecha,
+        Día: formatDayHeading(day.fecha),
+        'Día hábil': day.diaHabil ? 'Sí' : 'No',
+        'Horas debidas': day.esperadoMs / 3600000,
+        'Horas trabajadas': day.trabajadoMs / 3600000,
+        'Saldo horas': day.saldoMs / 3600000,
+        'Saldo legible': formatSaldoJornada(day.saldoMs),
+        Tramos: tramos || '-',
+        Observaciones: observaciones || '-',
+      };
+    });
+    const detailSheet = XLSX.utils.json_to_sheet(detailRows);
+    detailSheet['!cols'] = [
+      { wch: 12 },
+      { wch: 28 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 16 },
+      { wch: 42 },
+      { wch: 42 },
+    ];
+    XLSX.utils.book_append_sheet(workbook, detailSheet, 'Detalle');
+
+    XLSX.writeFile(
+      workbook,
+      `reporte-asistencia-${employeeName.replace(/\s+/g, '-')}-${reportData.desde}-${reportData.hasta}.xlsx`,
+    );
+  };
+
   const openEditHorariosModal = () => {
     const next: Record<string, HorarioEdit> = {};
     for (const f of itemsMismoDiaAr) {
@@ -545,7 +668,8 @@ export function RrhhPage() {
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-[1500px] mx-auto">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">RRHH · Jornada del día</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">RRHH</h1>
+        {activeView === 'general' && (
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -582,8 +706,37 @@ export function RrhhPage() {
             Actualizar
           </button>
         </div>
+        )}
       </div>
 
+      <div className="inline-flex rounded-lg border border-border bg-muted/30 p-1">
+        <NavLink
+          to="/rrhh"
+          end
+          className={({ isActive }) =>
+            [
+              'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+              isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+            ].join(' ')
+          }
+        >
+          Vista general
+        </NavLink>
+        <NavLink
+          to="/rrhh/reportes"
+          className={({ isActive }) =>
+            [
+              'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+              isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+            ].join(' ')
+          }
+        >
+          Generar reporte
+        </NavLink>
+      </div>
+
+      {activeView === 'general' && (
+        <>
       <Dialog
         open={editHorariosOpen}
         onClose={() => !savingHorarios && setEditHorariosOpen(false)}
@@ -770,7 +923,218 @@ export function RrhhPage() {
           <option value="tucuman">Tucuman</option>
         </select>
       </div>
+        </>
+      )}
 
+      {activeView === 'reportes' && (
+      <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="border-b border-border bg-muted/30 px-4 py-3">
+          <h2 className="text-base font-semibold text-foreground">Reporte por empleado</h2>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(220px,1fr)_repeat(3,auto)_auto_auto] gap-3 items-end">
+            <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Empleado
+              </span>
+              <select
+                value={reportEmpleadoId}
+                onChange={(e) => {
+                  setReportEmpleadoId(e.target.value);
+                  setReportData(null);
+                }}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              >
+                <option value="">Seleccionar empleado</option>
+                {empleados.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.firstName} {emp.lastName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Desde
+              </span>
+              <input
+                type="date"
+                value={reportDesde}
+                onChange={(e) => {
+                  setReportDesde(e.target.value);
+                  setReportData(null);
+                }}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Hasta
+              </span>
+              <input
+                type="date"
+                value={reportHasta}
+                max={hoyYmd}
+                onChange={(e) => {
+                  setReportHasta(e.target.value);
+                  setReportData(null);
+                }}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Hs/día
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={reportHorasEsperadas}
+                onChange={(e) => {
+                  setReportHorasEsperadas(e.target.value);
+                  setReportData(null);
+                }}
+                className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-sm tabular-nums"
+              />
+            </label>
+            <Button
+              type="button"
+              onClick={() => void loadEmployeeReport()}
+              disabled={reportLoading}
+            >
+              {reportLoading ? 'Generando…' : 'Generar'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              onClick={exportEmployeeReportExcel}
+              disabled={!hasReport}
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Excel
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="rounded-lg border border-border bg-background p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Días hábiles
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">
+                {reportData ? reportData.resumen.diasHabiles : '—'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-background p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Debió trabajar
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">
+                {reportData ? formatDuracion(reportData.resumen.esperadoMs) : '—'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-background p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Trabajó
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">
+                {reportData ? formatDuracion(reportData.resumen.trabajadoMs) : '—'}
+              </p>
+            </div>
+            <div className={`rounded-lg p-3 ${saldoJornadaClass(reportData?.resumen.saldoMs ?? 0, hasReport)}`}>
+              <p className="text-[11px] font-medium uppercase tracking-wide opacity-80">
+                Saldo
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">
+                {reportData ? formatSaldoJornada(reportData.resumen.saldoMs) : '—'}
+              </p>
+            </div>
+          </div>
+
+          {hasReport && (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead className="bg-muted/50">
+                  <tr className="border-b border-border">
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground w-[13rem]">
+                      Día
+                    </th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground w-[8rem]">
+                      Debidas
+                    </th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground w-[8rem]">
+                      Trabajadas
+                    </th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground w-[8rem]">
+                      Saldo
+                    </th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Detalle
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportData.dias.map((day) => {
+                    const observaciones = [
+                      ...day.entradasSinSalida.map((f) => `Entrada sin salida ${formatSoloHora(f.tiempo)}`),
+                      ...day.salidasSinEntrada.map((f) => `Salida sin entrada ${formatSoloHora(f.tiempo)}`),
+                    ];
+                    return (
+                      <tr key={day.fecha} className="border-b border-border/80 last:border-0 align-top">
+                        <td className="px-3 py-3">
+                          <p className="font-medium capitalize text-foreground">{formatDayHeading(day.fecha)}</p>
+                          {!day.diaHabil && (
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">No hábil</p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 font-mono tabular-nums">
+                          {formatDuracion(day.esperadoMs)}
+                        </td>
+                        <td className="px-3 py-3 font-mono tabular-nums">
+                          {day.tramos.length > 0 ? formatDuracion(day.trabajadoMs) : '—'}
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold tabular-nums ${saldoJornadaClass(day.saldoMs, day.diaHabil || day.tramos.length > 0)}`}>
+                            {day.diaHabil || day.tramos.length > 0 ? formatSaldoJornada(day.saldoMs) : '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="space-y-1.5">
+                            {day.tramos.map((p) => (
+                              <div
+                                key={`${p.entrada.id}-${p.salida.id}`}
+                                className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2 py-1 text-xs mr-1"
+                              >
+                                <span className="font-mono">{formatSoloHora(p.entrada.tiempo)}</span>
+                                <span className="text-muted-foreground">→</span>
+                                <span className="font-mono">{formatSoloHora(p.salida.tiempo)}</span>
+                                <span className="font-medium">{formatDuracion(p.ms)}</span>
+                              </div>
+                            ))}
+                            {observaciones.map((obs) => (
+                              <p key={obs} className="text-xs text-amber-700 dark:text-amber-200">
+                                {obs}
+                              </p>
+                            ))}
+                            {day.fichajes.length === 0 && (
+                              <span className="text-xs text-muted-foreground">Sin fichajes</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+      )}
+
+      {activeView === 'general' && (
+        <>
       {registrosFueraDelDia > 0 && (
         <p className="text-sm rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-950 dark:text-amber-100">
           {registrosFueraDelDia} registro(s) llegaron de la API con hora en otro día (Argentina) y no se mezclan en esta tabla. Revisá datos o el filtro en backend.
@@ -1009,6 +1373,8 @@ export function RrhhPage() {
           </button>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

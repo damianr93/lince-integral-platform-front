@@ -36,3 +36,48 @@ export interface FichajesPage {
   pages: number;
   fecha?: string;
 }
+
+export interface FichajeReporte {
+  id: string;
+  tiempo: string;
+  estado: 0 | 1;
+}
+
+export interface TramoReporte {
+  entrada: FichajeReporte;
+  salida: FichajeReporte;
+  ms: number;
+}
+
+export interface DiaReporteEmpleado {
+  fecha: string;
+  diaHabil: boolean;
+  esperadoMs: number;
+  trabajadoMs: number;
+  saldoMs: number;
+  fichajes: FichajeReporte[];
+  tramos: TramoReporte[];
+  entradasSinSalida: FichajeReporte[];
+  salidasSinEntrada: FichajeReporte[];
+}
+
+export interface ReporteEmpleadoRango {
+  empleado: {
+    id: string;
+    pin: string;
+    firstName: string;
+    lastName: string;
+    planta: Planta;
+  };
+  desde: string;
+  hasta: string;
+  horasEsperadasPorDia: number;
+  resumen: {
+    diasHabiles: number;
+    diasConTramos: number;
+    esperadoMs: number;
+    trabajadoMs: number;
+    saldoMs: number;
+  };
+  dias: DiaReporteEmpleado[];
+}

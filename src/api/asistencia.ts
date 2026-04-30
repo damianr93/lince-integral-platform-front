@@ -1,4 +1,4 @@
-import type { EmpleadoAsistencia, FichajeAsistencia, FichajesPage, Planta } from '@/types';
+import type { EmpleadoAsistencia, FichajeAsistencia, FichajesPage, Planta, ReporteEmpleadoRango } from '@/types';
 import { api } from './client';
 
 export interface FichajesQuery {
@@ -9,6 +9,8 @@ export interface FichajesQuery {
   pin?: string;
   nombre?: string;
   fecha?: string;
+  desde?: string;
+  hasta?: string;
   estado?: '' | '0' | '1';
 }
 
@@ -36,6 +38,8 @@ export const asistenciaApi = {
     if (query.pin) qs.set('pin', query.pin);
     if (query.nombre?.trim()) qs.set('nombre', query.nombre.trim());
     if (query.fecha?.trim()) qs.set('fecha', query.fecha.trim());
+    if (query.desde?.trim()) qs.set('desde', query.desde.trim());
+    if (query.hasta?.trim()) qs.set('hasta', query.hasta.trim());
     if (query.estado !== undefined && query.estado !== '') qs.set('estado', query.estado);
     return api.get<FichajesPage>(`/asistencia/logs?${qs.toString()}`);
   },
@@ -47,6 +51,14 @@ export const asistenciaApi = {
     api.get<EmpleadoAsistencia[]>(
       planta ? `/asistencia/empleados?planta=${planta}&soloActivos=true` : '/asistencia/empleados?soloActivos=true',
     ),
+
+  getReporteEmpleado: (empleadoId: string, query: { desde: string; hasta: string; horasEsperadasPorDia: number }) => {
+    const qs = new URLSearchParams();
+    qs.set('desde', query.desde);
+    qs.set('hasta', query.hasta);
+    qs.set('horasEsperadasPorDia', String(query.horasEsperadasPorDia));
+    return api.get<ReporteEmpleadoRango>(`/asistencia/reports/employee/${empleadoId}/range?${qs.toString()}`);
+  },
 
   createEmpleado: (payload: CreateEmpleadoPayload) =>
     api.post<EmpleadoAsistencia>('/asistencia/empleados', payload),

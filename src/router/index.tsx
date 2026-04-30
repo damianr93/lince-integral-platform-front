@@ -472,6 +472,14 @@ const router = createBrowserRouter([
                   </Suspense>
                 ),
               },
+              {
+                path: 'reportes',
+                element: (
+                  <Suspense fallback={<PageLoader />}>
+                    <RrhhPage />
+                  </Suspense>
+                ),
+              },
             ],
           },
         ],
