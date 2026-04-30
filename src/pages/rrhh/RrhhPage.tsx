@@ -13,6 +13,12 @@ interface RowDraft {
   empleadoId: string;
 }
 
+interface HorarioEdit {
+  fecha: string;
+  hora: string;
+  estado: 0 | 1;
+}
+
 const AR_TZ = 'America/Argentina/Buenos_Aires';
 const MS_8_HORAS = 8 * 60 * 60 * 1000;
 
@@ -52,6 +58,12 @@ function formatDuracion(ms: number): string {
   return '< 1 min';
 }
 
+function formatSaldoJornada(ms: number): string {
+  const abs = Math.abs(ms);
+  if (abs < 60000) return '0 min';
+  return `${ms > 0 ? '+' : '-'} ${formatDuracion(abs)}`;
+}
+
 function duracionTotalClass(totalMs: number, tieneIntervalosValidos: boolean): string {
   if (!tieneIntervalosValidos) {
     return 'bg-muted/40 text-muted-foreground';
@@ -60,6 +72,19 @@ function duracionTotalClass(totalMs: number, tieneIntervalosValidos: boolean): s
     return 'bg-emerald-500/25 text-emerald-900 dark:text-emerald-100 font-semibold ring-1 ring-emerald-500/30';
   }
   return 'bg-red-500/25 text-red-900 dark:text-red-100 font-semibold ring-1 ring-red-500/30';
+}
+
+function saldoJornadaClass(saldoMs: number, tieneIntervalosValidos: boolean): string {
+  if (!tieneIntervalosValidos) {
+    return 'bg-muted/40 text-muted-foreground';
+  }
+  if (Math.abs(saldoMs) < 60000) {
+    return 'bg-muted/60 text-foreground ring-1 ring-border';
+  }
+  if (saldoMs > 0) {
+    return 'bg-emerald-500/20 text-emerald-900 dark:text-emerald-100 ring-1 ring-emerald-500/30';
+  }
+  return 'bg-red-500/20 text-red-900 dark:text-red-100 ring-1 ring-red-500/30';
 }
 
 function todayYmdAr(): string {
@@ -284,9 +309,7 @@ export function RrhhPage() {
   const [planta, setPlanta] = useState<'' | Planta>('');
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
   const [editHorariosOpen, setEditHorariosOpen] = useState(false);
-  const [horarioEdits, setHorarioEdits] = useState<Record<string, { fecha: string; hora: string }>>(
-    {},
-  );
+  const [horarioEdits, setHorarioEdits] = useState<Record<string, HorarioEdit>>({});
   const [savingHorarios, setSavingHorarios] = useState(false);
 
   const loadData = async () => {
@@ -460,11 +483,12 @@ export function RrhhPage() {
   };
 
   const openEditHorariosModal = () => {
-    const next: Record<string, { fecha: string; hora: string }> = {};
+    const next: Record<string, HorarioEdit> = {};
     for (const f of itemsMismoDiaAr) {
       next[f.id] = {
         fecha: tiempoYmdEnAr(f.tiempo),
         hora: tiempoHmsEnAr(f.tiempo),
+        estado: f.estado,
       };
     }
     setHorarioEdits(next);
@@ -474,24 +498,33 @@ export function RrhhPage() {
   const saveHorariosModal = async () => {
     setSavingHorarios(true);
     try {
-      const toPatch: { id: string; tiempo: string }[] = [];
+      const toPatch: { id: string; tiempo?: string; estado?: 0 | 1 }[] = [];
       for (const f of itemsMismoDiaAr) {
         const ed = horarioEdits[f.id];
         if (!ed) continue;
         const newIso = arFechaYHoraToIso(ed.fecha, ed.hora);
+        const patch: { id: string; tiempo?: string; estado?: 0 | 1 } = { id: f.id };
         if (new Date(newIso).getTime() !== new Date(f.tiempo).getTime()) {
-          toPatch.push({ id: f.id, tiempo: newIso });
+          patch.tiempo = newIso;
+        }
+        if (ed.estado !== f.estado) {
+          patch.estado = ed.estado;
+        }
+        if (patch.tiempo !== undefined || patch.estado !== undefined) {
+          toPatch.push(patch);
         }
       }
       if (toPatch.length === 0) {
-        toast.message('No hay cambios de horario para guardar');
+        toast.message('No hay cambios para guardar');
         setEditHorariosOpen(false);
         return;
       }
       await Promise.all(
-        toPatch.map((u) => asistenciaApi.updateFichaje(u.id, { tiempo: u.tiempo })),
+        toPatch.map((u) =>
+          asistenciaApi.updateFichaje(u.id, { tiempo: u.tiempo, estado: u.estado }),
+        ),
       );
-      toast.success(`${toPatch.length} horario(s) actualizado(s)`);
+      toast.success(`${toPatch.length} fichaje(s) actualizado(s)`);
       setEditHorariosOpen(false);
       await loadData();
     } catch (err) {
@@ -510,7 +543,7 @@ export function RrhhPage() {
   );
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 space-y-6 max-w-[1500px] mx-auto">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">RRHH · Jornada del día</h1>
         <div className="flex items-center gap-2">
@@ -581,6 +614,7 @@ export function RrhhPage() {
                 const ed = horarioEdits[f.id] ?? {
                   fecha: tiempoYmdEnAr(f.tiempo),
                   hora: tiempoHmsEnAr(f.tiempo),
+                  estado: f.estado,
                 };
                 return (
                   <tr key={f.id} className="border-b border-border/80 last:border-0">
@@ -589,8 +623,27 @@ export function RrhhPage() {
                         {fichajeEmpleadoLabel(f)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 align-middle text-xs text-muted-foreground">
-                      {f.estado === 0 ? 'Entrada' : 'Salida'}
+                    <td className="px-3 py-2 align-middle">
+                      <select
+                        value={String(ed.estado)}
+                        onChange={(e) =>
+                          setHorarioEdits((prev) => {
+                            const cur = prev[f.id] ?? {
+                              fecha: tiempoYmdEnAr(f.tiempo),
+                              hora: tiempoHmsEnAr(f.tiempo),
+                              estado: f.estado,
+                            };
+                            return {
+                              ...prev,
+                              [f.id]: { ...cur, estado: Number(e.target.value) as 0 | 1 },
+                            };
+                          })
+                        }
+                        className="w-full min-w-[6.5rem] rounded-md border border-border bg-background px-2 py-1 text-xs"
+                      >
+                        <option value="0">Entrada</option>
+                        <option value="1">Salida</option>
+                      </select>
                     </td>
                     <td className="px-3 py-2 align-middle">
                       <input
@@ -601,6 +654,7 @@ export function RrhhPage() {
                             const cur = prev[f.id] ?? {
                               fecha: tiempoYmdEnAr(f.tiempo),
                               hora: tiempoHmsEnAr(f.tiempo),
+                              estado: f.estado,
                             };
                             return { ...prev, [f.id]: { ...cur, fecha: e.target.value } };
                           })
@@ -618,6 +672,7 @@ export function RrhhPage() {
                             const cur = prev[f.id] ?? {
                               fecha: tiempoYmdEnAr(f.tiempo),
                               hora: tiempoHmsEnAr(f.tiempo),
+                              estado: f.estado,
                             };
                             return { ...prev, [f.id]: { ...cur, hora: e.target.value } };
                           })
@@ -723,27 +778,30 @@ export function RrhhPage() {
       )}
 
       <p className="text-sm text-muted-foreground">
-        Por empleado se suman todos los tramos entrada → salida del día. El total en verde si acumula 8 h o más; en rojo si menos. Desplegá «Fichajes» para corregir estado o guardar.
+        Por empleado se suman todos los tramos entrada → salida del día. El saldo compara contra 8 h. Desplegá «Fichajes» para corregir estado o guardar.
       </p>
 
       <div className="rounded-xl border border-border overflow-hidden shadow-sm bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[1320px] table-fixed text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[22%]">
+                <th className="px-5 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[17rem]">
                   Empleado
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                <th className="px-5 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[30rem]">
                   Tramos en planta
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[12%]">
+                <th className="px-5 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[9rem]">
                   Planta
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[20%]">
+                <th className="px-5 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[10.5rem]">
                   Total del día
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide w-[10%]">
+                <th className="px-5 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[10rem]">
+                  Saldo 8 h
+                </th>
+                <th className="px-5 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide w-[8rem]">
                   Detalle
                 </th>
               </tr>
@@ -753,12 +811,13 @@ export function RrhhPage() {
               const options = first ? (empleadosByPin.get(first.pin) ?? empleados) : empleados;
               const draftMain = first ? draftFor(first) : { empleadoId: '', estado: '0' as EstadoOption };
               const tieneValidos = agg.pairs.length > 0;
+              const saldoMs = agg.totalMs - MS_8_HORAS;
               const expanded = expandedKeys.has(agg.key);
 
               return (
                 <tbody key={agg.key} className="border-b border-border last:border-0">
                   <tr className="hover:bg-muted/20 align-top">
-                    <td className="px-4 py-4">
+                    <td className="px-5 py-5">
                       <p className="font-medium text-foreground leading-snug">{employeeDisplayLabel(agg)}</p>
                       {first && (
                         <select
@@ -766,7 +825,7 @@ export function RrhhPage() {
                           onChange={(e) => {
                             void aplicarEmpleadoGrupo(agg, e.target.value);
                           }}
-                          className="mt-2 w-full max-w-[220px] rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                          className="mt-2 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
                         >
                           <option value="">Sin asociar</option>
                           {options.map((emp) => (
@@ -777,12 +836,12 @@ export function RrhhPage() {
                         </select>
                       )}
                     </td>
-                    <td className="px-4 py-4">
-                      <div className="space-y-2">
+                    <td className="px-5 py-5">
+                      <div className="space-y-2.5">
                         {agg.pairs.map((p) => (
                           <div
                             key={`${p.entrada.id}-${p.salida.id}`}
-                            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border/80 bg-muted/30 px-3 py-2 text-xs"
+                            className="flex items-center gap-2 rounded-lg border border-border/80 bg-muted/30 px-3 py-2 text-xs whitespace-nowrap"
                           >
                             <span className="font-mono tabular-nums" title={formatFichajeHora(p.entrada.tiempo)}>
                               {formatSoloHora(p.entrada.tiempo)}
@@ -791,7 +850,7 @@ export function RrhhPage() {
                             <span className="font-mono tabular-nums" title={formatFichajeHora(p.salida.tiempo)}>
                               {formatSoloHora(p.salida.tiempo)}
                             </span>
-                            <span className="ml-auto font-medium tabular-nums text-foreground">
+                            <span className="ml-auto pl-4 font-medium tabular-nums text-foreground">
                               {formatDuracion(p.ms)}
                             </span>
                           </div>
@@ -799,7 +858,7 @@ export function RrhhPage() {
                         {agg.orphanEntradas.map((f) => (
                           <div
                             key={f.id}
-                            className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100"
+                            className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100 whitespace-nowrap overflow-hidden text-ellipsis"
                           >
                             Entrada sin salida emparejada ·{' '}
                             <span className="font-mono">{formatSoloHora(f.tiempo)}</span>
@@ -808,7 +867,7 @@ export function RrhhPage() {
                         {agg.orphanSalidas.map((f) => (
                           <div
                             key={f.id}
-                            className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100"
+                            className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100 whitespace-nowrap overflow-hidden text-ellipsis"
                           >
                             Salida sin entrada emparejada ·{' '}
                             <span className="font-mono">{formatSoloHora(f.tiempo)}</span>
@@ -821,12 +880,12 @@ export function RrhhPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-4 text-xs text-muted-foreground align-middle capitalize">
+                    <td className="px-5 py-5 text-xs text-muted-foreground align-middle capitalize whitespace-nowrap">
                       {plantasLabel(agg)}
                     </td>
-                    <td className="px-4 py-4 align-middle">
+                    <td className="px-5 py-5 align-middle">
                       <div
-                        className={`inline-flex flex-col rounded-lg px-4 py-3 text-center min-w-[8.5rem] ${duracionTotalClass(agg.totalMs, tieneValidos)}`}
+                        className={`inline-flex w-full flex-col rounded-lg px-3 py-3 text-center ${duracionTotalClass(agg.totalMs, tieneValidos)}`}
                         title={
                           tieneValidos
                             ? `${(agg.totalMs / 3600000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} h totales`
@@ -846,11 +905,28 @@ export function RrhhPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-4 text-right align-middle">
+                    <td className="px-5 py-5 align-middle">
+                      <div
+                        className={`inline-flex w-full flex-col rounded-lg px-3 py-3 text-center font-semibold ${saldoJornadaClass(saldoMs, tieneValidos)}`}
+                        title={
+                          tieneValidos
+                            ? `Diferencia contra 8 h: ${formatSaldoJornada(saldoMs)}`
+                            : 'Requiere al menos un tramo entrada→salida válido'
+                        }
+                      >
+                        <span className="text-[10px] font-medium uppercase tracking-wider opacity-80">
+                          Diferencia
+                        </span>
+                        <span className="text-base tabular-nums leading-tight mt-0.5">
+                          {tieneValidos ? formatSaldoJornada(saldoMs) : '—'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-5 text-right align-middle">
                       <button
                         type="button"
                         onClick={() => toggleExpand(agg.key)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-accent"
+                        className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs whitespace-nowrap hover:bg-accent"
                       >
                         Fichajes
                         <ChevronDown
@@ -861,7 +937,7 @@ export function RrhhPage() {
                   </tr>
                   {expanded && (
                     <tr className="bg-muted/15">
-                      <td colSpan={5} className="px-4 py-3 border-t border-border/60">
+                      <td colSpan={6} className="px-4 py-3 border-t border-border/60">
                         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                           {agg.fichajes.map((f) => {
                             const d = draftFor(f);
