@@ -34,4 +34,5 @@ export interface FichajesPage {
   page: number;
   limit: number;
   pages: number;
+  fecha?: string;
 }

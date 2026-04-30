@@ -8,15 +8,18 @@ interface DialogProps {
   title: string;
   description?: string;
   children: ReactNode;
+  panelClassName?: string;
 }
 
-export function Dialog({ open, onClose, title, description, children }: DialogProps) {
+export function Dialog({ open, onClose, title, description, children, panelClassName }: DialogProps) {
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-50 w-full max-w-lg rounded-lg border bg-card p-4 sm:p-6 shadow-lg my-auto">
+      <div
+        className={`relative z-50 w-full max-w-lg rounded-lg border bg-card p-4 sm:p-6 shadow-lg my-auto ${panelClassName ?? ''}`}
+      >
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold">{title}</h2>

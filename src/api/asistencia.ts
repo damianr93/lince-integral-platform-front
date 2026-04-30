@@ -7,6 +7,8 @@ export interface FichajesQuery {
   planta?: Planta;
   empleadoId?: string;
   pin?: string;
+  nombre?: string;
+  fecha?: string;
   estado?: '' | '0' | '1';
 }
 
@@ -32,6 +34,8 @@ export const asistenciaApi = {
     if (query.planta) qs.set('planta', query.planta);
     if (query.empleadoId) qs.set('empleadoId', query.empleadoId);
     if (query.pin) qs.set('pin', query.pin);
+    if (query.nombre?.trim()) qs.set('nombre', query.nombre.trim());
+    if (query.fecha?.trim()) qs.set('fecha', query.fecha.trim());
     if (query.estado !== undefined && query.estado !== '') qs.set('estado', query.estado);
     return api.get<FichajesPage>(`/asistencia/logs?${qs.toString()}`);
   },
