@@ -40,6 +40,7 @@ const FACTURA_LABELS: Record<string, string> = {
 const RETENCION_LABELS: Record<string, string> = {
   cuitEmisor:   'CUIT del Agente de Retención',
   tipoImpuesto: 'Tipo de impuesto',
+  provincia:    'Provincia / jurisdicción IIBB',
   monto:        'Monto de la retención',
 };
 

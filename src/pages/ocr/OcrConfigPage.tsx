@@ -33,6 +33,7 @@ const AVAILABLE_FIELDS: Record<DocumentType, { key: string; label: string }[]> =
   [DocumentType.RETENCION]: [
     { key: 'cuitEmisor',   label: 'CUIT del Agente de Retención' },
     { key: 'tipoImpuesto', label: 'Tipo de impuesto (GANANCIAS / IIBB)' },
+    { key: 'provincia',    label: 'Provincia / jurisdicción IIBB' },
     { key: 'monto',        label: 'Monto de la retención' },
   ],
 };

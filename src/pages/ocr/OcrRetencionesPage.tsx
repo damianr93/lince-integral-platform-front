@@ -4,6 +4,7 @@
  * Extrae automáticamente:
  *  - CUIT del Agente de Retención (emisor del certificado)
  *  - Tipo de impuesto: GANANCIAS o IIBB
+ *  - Provincia / jurisdicción IIBB si figura en el comprobante
  *  - Monto de la retención
  *
  * Flujo:
@@ -44,12 +45,14 @@ const POLL_MAX_RETRIES  = 24;
 const DEFAULT_RETENCION_FIELDS: Record<string, string> = {
   cuitEmisor:   '',
   tipoImpuesto: '',
+  provincia:    '',
   monto:        '',
 };
 
 const FIELD_LABELS: Record<string, string> = {
   cuitEmisor:   'CUIT del Agente de Retención',
   tipoImpuesto: 'Tipo de impuesto (GANANCIAS / IIBB)',
+  provincia:    'Provincia / jurisdicción IIBB',
   monto:        'Monto de la retención',
 };
 
@@ -171,7 +174,7 @@ export function OcrRetencionesPage() {
       <div>
         <h1 className="text-lg font-semibold text-foreground">Mis Retenciones</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Cargá certificados de retención (SI.CO.RE.) — el sistema extrae el CUIT, tipo de impuesto y monto
+          Cargá certificados de retención (SI.CO.RE.) — el sistema extrae el CUIT, impuesto, provincia si figura y monto
         </p>
       </div>
 
@@ -191,7 +194,7 @@ export function OcrRetencionesPage() {
             <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
             <p className="text-sm font-semibold text-foreground">Subir certificado de retención</p>
             <p className="text-xs text-muted-foreground mt-1">
-              PDF o imagen del formulario SI.CO.RE. · El sistema extrae CUIT, impuesto y monto
+              PDF o imagen del formulario SI.CO.RE. · El sistema extrae CUIT, impuesto, provincia si figura y monto
             </p>
             <button className="mt-4 px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
               Seleccionar archivo
@@ -223,7 +226,7 @@ export function OcrRetencionesPage() {
         <div className="border border-border rounded-xl p-6 text-center space-y-3">
           <RefreshCw className="h-10 w-10 mx-auto text-blue-500 animate-spin" />
           <p className="text-sm font-medium text-foreground">Procesando OCR…</p>
-          <p className="text-xs text-muted-foreground">Extrayendo CUIT, impuesto y monto del certificado.</p>
+          <p className="text-xs text-muted-foreground">Extrayendo CUIT, impuesto, provincia y monto del certificado.</p>
           {pollStatus && <StatusBadge status={pollStatus} />}
         </div>
       )}
@@ -256,13 +259,14 @@ export function OcrRetencionesPage() {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[520px]">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">ID</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Estado OCR</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">CUIT Emisor</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Impuesto</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Provincia</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Monto</th>
                 <th className="px-4 py-2.5" />
               </tr>
@@ -270,13 +274,13 @@ export function OcrRetencionesPage() {
             <tbody className="divide-y divide-border">
               {loading && docs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">
                     <RefreshCw className="h-4 w-4 animate-spin inline mr-2" />Cargando…
                   </td>
                 </tr>
               ) : docs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">
                     Todavía no subiste ningún certificado de retención
                   </td>
                 </tr>
@@ -297,6 +301,9 @@ export function OcrRetencionesPage() {
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground text-xs">
                       {doc.extractedData?.['tipoImpuesto'] || '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground text-xs">
+                      {doc.extractedData?.['provincia'] || '—'}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground text-xs">
                       {doc.extractedData?.['monto'] ? `$\u00a0${doc.extractedData['monto']}` : '—'}
@@ -354,7 +361,7 @@ export function OcrRetencionesPage() {
       <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-900/20 dark:border-blue-800">
         <p className="text-xs text-blue-700 dark:text-blue-400 font-medium mb-1">Campos extraídos</p>
         <p className="text-xs text-blue-600 dark:text-blue-400">
-          El sistema extrae el CUIT del emisor, tipo de impuesto y monto del certificado.
+          El sistema extrae el CUIT del emisor, tipo de impuesto, provincia si figura y monto del certificado.
           Podés corregir cualquier campo mal extraído antes de que el ADMIN lo apruebe.
         </p>
       </div>

@@ -42,6 +42,7 @@ const FIELD_LABELS: Record<string, string> = {
   // Retención SI.CO.RE.
   cuitEmisor:   'CUIT Agente de Retención',
   tipoImpuesto: 'Tipo de impuesto',
+  provincia:    'Provincia / jurisdicción IIBB',
   monto:        'Monto de la retención',
   // Genérico
   destinatario:  'Destinatario',

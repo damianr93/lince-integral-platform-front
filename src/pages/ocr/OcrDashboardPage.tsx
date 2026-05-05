@@ -195,7 +195,7 @@ export function OcrDashboardPage() {
         <div className="overflow-x-auto">
           <table
             className={`w-full text-sm ${
-              tab === DocumentType.RETENCION ? 'min-w-[900px]' : 'min-w-[640px]'
+              tab === DocumentType.RETENCION ? 'min-w-[980px]' : 'min-w-[640px]'
             }`}
           >
             <thead>
@@ -207,6 +207,7 @@ export function OcrDashboardPage() {
                   <>
                     <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">CUIT emisor</th>
                     <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Impuesto</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Provincia</th>
                     <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Monto</th>
                   </>
                 )}
@@ -218,7 +219,7 @@ export function OcrDashboardPage() {
               {loading && docs.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={tab === DocumentType.RETENCION ? 8 : 5}
+                    colSpan={tab === DocumentType.RETENCION ? 9 : 5}
                     className="px-4 py-8 text-center text-muted-foreground text-sm"
                   >
                     <div className="flex items-center justify-center gap-2">
@@ -229,7 +230,7 @@ export function OcrDashboardPage() {
               ) : docs.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={tab === DocumentType.RETENCION ? 8 : 5}
+                    colSpan={tab === DocumentType.RETENCION ? 9 : 5}
                     className="px-4 py-8 text-center text-muted-foreground text-sm"
                   >
                     No hay {tabLabelPlural(tab)} con los filtros seleccionados
@@ -258,6 +259,9 @@ export function OcrDashboardPage() {
                           </td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs">
                             {doc.extractedData?.['tipoImpuesto'] || '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs">
+                            {doc.extractedData?.['provincia'] || '—'}
                           </td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs">
                             {doc.extractedData?.['monto'] ? `$\u00a0${doc.extractedData['monto']}` : '—'}
