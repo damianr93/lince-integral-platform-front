@@ -22,7 +22,8 @@ interface HorarioEdit {
 }
 
 const AR_TZ = 'America/Argentina/Buenos_Aires';
-const MS_8_HORAS = 8 * 60 * 60 * 1000;
+const HORAS_JORNADA = 9;
+const MS_JORNADA = HORAS_JORNADA * 60 * 60 * 1000;
 
 const fmtFichajeTiempo = new Intl.DateTimeFormat('es-AR', {
   timeZone: AR_TZ,
@@ -71,7 +72,7 @@ function duracionTotalClass(totalMs: number, tieneIntervalosValidos: boolean): s
   if (!tieneIntervalosValidos) {
     return 'bg-muted/40 text-muted-foreground';
   }
-  if (totalMs >= MS_8_HORAS) {
+  if (totalMs >= MS_JORNADA) {
     return 'bg-emerald-500/25 text-emerald-900 dark:text-emerald-100 font-semibold ring-1 ring-emerald-500/30';
   }
   return 'bg-red-500/25 text-red-900 dark:text-red-100 font-semibold ring-1 ring-red-500/30';
@@ -319,7 +320,7 @@ export function RrhhPage() {
   const [reportEmpleadoId, setReportEmpleadoId] = useState('');
   const [reportDesde, setReportDesde] = useState(() => addDaysYmdAr(todayYmdAr(), -30));
   const [reportHasta, setReportHasta] = useState(todayYmdAr);
-  const [reportHorasEsperadas, setReportHorasEsperadas] = useState('8');
+  const [reportHorasEsperadas, setReportHorasEsperadas] = useState(String(HORAS_JORNADA));
   const [reportData, setReportData] = useState<ReporteEmpleadoRango | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
 
@@ -1142,7 +1143,7 @@ export function RrhhPage() {
       )}
 
       <p className="text-sm text-muted-foreground">
-        Por empleado se suman todos los tramos entrada → salida del día. El saldo compara contra 8 h. Desplegá «Fichajes» para corregir estado o guardar.
+        Por empleado se suman todos los tramos entrada → salida del día. El saldo compara contra {HORAS_JORNADA} h. Desplegá «Fichajes» para corregir estado o guardar.
       </p>
 
       <div className="rounded-xl border border-border overflow-hidden shadow-sm bg-card">
@@ -1163,7 +1164,7 @@ export function RrhhPage() {
                   Total del día
                 </th>
                 <th className="px-5 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-[10rem]">
-                  Saldo 8 h
+                  Saldo {HORAS_JORNADA} h
                 </th>
                 <th className="px-5 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide w-[8rem]">
                   Detalle
@@ -1175,7 +1176,7 @@ export function RrhhPage() {
               const options = first ? (empleadosByPin.get(first.pin) ?? empleados) : empleados;
               const draftMain = first ? draftFor(first) : { empleadoId: '', estado: '0' as EstadoOption };
               const tieneValidos = agg.pairs.length > 0;
-              const saldoMs = agg.totalMs - MS_8_HORAS;
+              const saldoMs = agg.totalMs - MS_JORNADA;
               const expanded = expandedKeys.has(agg.key);
 
               return (
@@ -1264,7 +1265,7 @@ export function RrhhPage() {
                         </span>
                         {tieneValidos && (
                           <span className="text-[10px] opacity-70 mt-1">
-                            {agg.totalMs >= MS_8_HORAS ? '≥ 8 h' : '< 8 h'}
+                            {agg.totalMs >= MS_JORNADA ? `≥ ${HORAS_JORNADA} h` : `< ${HORAS_JORNADA} h`}
                           </span>
                         )}
                       </div>
@@ -1274,7 +1275,7 @@ export function RrhhPage() {
                         className={`inline-flex w-full flex-col rounded-lg px-3 py-3 text-center font-semibold ${saldoJornadaClass(saldoMs, tieneValidos)}`}
                         title={
                           tieneValidos
-                            ? `Diferencia contra 8 h: ${formatSaldoJornada(saldoMs)}`
+                            ? `Diferencia contra ${HORAS_JORNADA} h: ${formatSaldoJornada(saldoMs)}`
                             : 'Requiere al menos un tramo entrada→salida válido'
                         }
                       >
